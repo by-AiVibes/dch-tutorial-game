@@ -10,6 +10,9 @@ A 45–60 minute session for developers who know basic XRPL concepts (accounts, 
 2. `npm run dch -- reset-world` (about 30–60 s: six faucet accounts). If the faucet is busy, the
    command fails cleanly and the previous world stays; run it again in a minute.
 3. `npm start` and open the dashboard. On a shared screen, keep `DCH_ALLOW_HTTP_RESET` off.
+   Workshop behind one NAT/Wi-Fi? Everyone shares one IP for the rate limits: start with e.g.
+   `DCH_RL_HEAVY_MAX=120 DCH_RL_ACCOUNT_MAX=600 DCH_RL_READ_MAX=1200` (see DEPLOY.md). A 429 or
+   503 answer means "wait the Retry-After seconds", not a ledger failure.
 
 ## Running it
 

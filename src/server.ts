@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.ts";
 import { Game } from "./game.ts";
 import { assertNoSecrets, cleanAddress } from "./secrets.ts";
+import { BusyError, classify, clientIp, RateLimiter, rulesFromEnv } from "./limits.ts";
 
 const PORT = Number(process.env.PORT || 8790);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -14,6 +15,11 @@ const PUBLIC = join(import.meta.dirname, "..", "public");
 const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css" };
 /** reset-world spends faucet requests; allow it over HTTP only when explicitly enabled. */
 const ALLOW_HTTP_RESET = process.env.DCH_ALLOW_HTTP_RESET === "1";
+
+function sendBusy(res: ServerResponse, message: string) {
+  res.writeHead(503, { "content-type": "application/json", "retry-after": "5", "cache-control": "no-store" });
+  res.end(JSON.stringify({ error: message, retryAfterSeconds: 5 }));
+}
 
 function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
@@ -39,9 +45,23 @@ const VENDOR: Record<string, string> = {
   "/vendor/xrpl.js": join(import.meta.dirname, "..", "node_modules", "xrpl", "build", "xrpl-latest-min.js"),
 };
 
-export function createHandler(game: Game) {
+export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv()), trustProxy = process.env.TRUST_PROXY === "1") {
   return (req: IncomingMessage, res: ServerResponse) => {
-    handle(game, req, res).catch((e) => send(res, 400, { error: e instanceof Error ? e.message : String(e) }));
+    let path = "/";
+    try {
+      path = new URL(req.url ?? "/", "http://localhost").pathname;
+    } catch {
+      /* handled as invalid_url below */
+    }
+    const ip = clientIp(req.socket.remoteAddress, { "x-real-ip": req.headers["x-real-ip"], "x-forwarded-for": req.headers["x-forwarded-for"] }, trustProxy);
+    const wait = limiter.check(ip, classify(req.method ?? "GET", path));
+    if (wait > 0) {
+      res.writeHead(429, { "content-type": "application/json", "retry-after": String(wait), "cache-control": "no-store" });
+      return res.end(JSON.stringify({ error: "rate_limited", retryAfterSeconds: wait }));
+    }
+    handle(game, req, res).catch((e) =>
+      e instanceof BusyError ? sendBusy(res, e.message) : send(res, 400, { error: e instanceof Error ? e.message : String(e) }),
+    );
   };
 }
 
@@ -102,5 +122,11 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const game = new Game(loadConfig(), (m) => console.log(m));
-  createServer(createHandler(game)).listen(PORT, HOST, () => console.log(`DCH tutorial game on http://${HOST}:${PORT} (${game.cfg.name})`));
+  const server = createServer(createHandler(game));
+  // Slowloris / idle-connection protection (the proxy has its own timeouts too).
+  server.headersTimeout = 10_000;
+  server.requestTimeout = 30_000;
+  server.keepAliveTimeout = 5_000;
+  server.maxHeadersCount = 50;
+  server.listen(PORT, HOST, () => console.log(`DCH tutorial game on http://${HOST}:${PORT} (${game.cfg.name})`));
 }

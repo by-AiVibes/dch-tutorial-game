@@ -104,10 +104,10 @@ export const LEVELS: LevelDef[] = [
     ],
     explainer: [
       "Multi-purpose tokens (MPTs) are a token type held directly in an account, without a trust line.",
-      "The ConfidentialTransfer amendment is a proposal in amendment voting; check its status on the Known Amendments page and in this game's live amendment check.",
+      "ConfidentialTransfer is in amendment voting on mainnet (see the Known Amendments page). On test networks, check this game's live amendment check: as of Nov 21 2026 it was enabled on devnet.",
       "Per xrpl.org, it uses EC-ElGamal encryption and zero-knowledge proofs so individual MPT balances and transfer amounts are shielded from public view (spec: XLS-96).",
       "Compliance still works: authorized parties such as the issuer or a designated auditor can verify total supply.",
-      "Interactive steps are planned; they will turn on only where the live check shows ConfidentialTransfer enabled. The status for this network is in the Network check panel.",
+      "This level is an explainer for now; its hands-on steps are coming, and will run only where the live check shows ConfidentialTransfer enabled.",
     ],
   }),
 ];

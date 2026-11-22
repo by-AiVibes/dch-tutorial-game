@@ -79,14 +79,11 @@ async function coSignedLoan(ctx: LevelContext, brokerId: string, principalXrp: n
     PaymentInterval: PAYMENT_INTERVAL_S,
     GracePeriod: PAYMENT_INTERVAL_S,
   };
-  const warn = console.warn; // xrpl.js warns about counterparty fee estimation on every LoanSet
-  console.warn = () => {};
-  let prepared: LoanSet;
-  try {
-    prepared = (await ctx.client.autofill(tx)) as LoanSet;
-  } finally {
-    console.warn = warn;
-  }
+  // Set the fee ourselves (base fee x2: one extra for the counterparty signature), so autofill
+  // skips its LoanSet fee estimate and its console warning.
+  const fee = await ctx.client.request({ command: "fee" });
+  const base = Math.max(Number(fee.result.drops.base_fee), Number(fee.result.drops.open_ledger_fee));
+  const prepared = (await ctx.client.autofill({ ...tx, Fee: String(base * 2) })) as LoanSet;
   const first = lender.sign(prepared);
   const both = signLoanSetByCounterparty(borrower, first.tx_blob);
   const r = await submitBlob(ctx.client, both.tx_blob, both.hash, "LoanSet", lender.address);
@@ -111,7 +108,8 @@ async function runGoal(ctx: LevelContext): Promise<StepOutcome> {
     await step("borrower", { TransactionType: "LoanPay", LoanID, Amount: due }, `Borrower repays ${Number(due) / 1e6} XRP`);
     const after = await ledgerEntry(ctx, { index: LoanID });
     ctx.note(`Auditor: after repay, payments remaining ${after?.PaymentRemaining ?? 0}`);
-    const pass = !after || Number(after.PaymentRemaining ?? 0) === 0;
+    // ledgerEntry returns null only for "entry not found" (loan removed); RPC errors throw.
+    const pass = after === null || Number(after.PaymentRemaining ?? 0) === 0;
     return { ok: pass, message: pass ? "Loan funded from the vault and fully repaid." : `Loan still open: ${JSON.stringify(after)}`, results };
   } catch (e) {
     return { ok: false, message: (e as Error).message, results };

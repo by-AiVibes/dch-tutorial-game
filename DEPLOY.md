@@ -14,4 +14,9 @@ Plan, for later:
 - Outbound access needed: the test network WebSocket (default port 51233, or a 443 endpoint via
   `XRPL_WS`) and the faucet over HTTPS.
 - Health check: `GET /api/state` returns 200.
-- Test networks only. The app refuses mainnet URLs and a `network_id` of 0.
+- Before public hosting, add a rate limit and a queue cap: `/api/objects` and the
+  `/api/levels/...` endpoints each trigger ledger requests (and level runs submit transactions);
+  today all operations share one in-process queue with no cap.
+- Network: devnet by default (`XRPL_NETWORK=devnet`); set `XRPL_NETWORK=testnet` to switch.
+  Only allowlisted test hosts are accepted, and the server must report `network_id` 2 or 1;
+  mainnet is refused.

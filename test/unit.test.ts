@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { botSeats, canAct, claimSeat, releaseSeat } from "../src/seats.ts";
 import { award, judgeShouldFail, levelPoints, MAX_SCORE, total } from "../src/scoring.ts";
 import { featureEnabled, parseFeatures, type AmendmentReport } from "../src/amendments.ts";
-import { assertNotMainnetUrl, assertTestNetworkId, loadConfig } from "../src/config.ts";
+import { assertAllowedHost, assertTestNetworkId, loadConfig } from "../src/config.ts";
 import { LEVELS, SCORED_LEVELS } from "../src/levels/index.ts";
 
 test("seats: bots by default, claim/move/release", () => {
@@ -47,15 +47,24 @@ test("scoring: 10 + 5 + 5 once per world, max 140", () => {
   assert.equal(SCORED_LEVELS.length, 7);
 });
 
-test("should-fail judge: only rejections score; acceptance is flagged", () => {
-  assert.deepEqual(judgeShouldFail("tecPATH_DRY", ["tecPATH_DRY"]), { rejected: true, matchedExpected: true, bug: false });
-  assert.equal(judgeShouldFail("temBAD_AMOUNT", ["tecPATH_DRY"]).matchedExpected, false);
-  assert.equal(judgeShouldFail("tesSUCCESS", ["tecPATH_DRY"]).bug, true);
+test("should-fail judge: only final rejections score", () => {
+  assert.deepEqual(judgeShouldFail("tecPATH_DRY", true, ["tecPATH_DRY"]), { verdict: "rejected", matchedExpected: true });
+  assert.equal(judgeShouldFail("tecPATH_DRY", false, ["tecPATH_DRY"]).verdict, "inconclusive", "unvalidated tec");
+  assert.equal(judgeShouldFail("temBAD_AMOUNT", false, ["tecPATH_DRY"]).verdict, "rejected");
+  assert.equal(judgeShouldFail("tefPAST_SEQ", false, []).verdict, "rejected");
+  assert.equal(judgeShouldFail("telINSUF_FEE_P", false, []).verdict, "rejected");
+  assert.equal(judgeShouldFail("temBAD_AMOUNT", false, ["tecPATH_DRY"]).matchedExpected, false);
+  assert.equal(judgeShouldFail("terQUEUED", false, []).verdict, "inconclusive");
+  assert.equal(judgeShouldFail("submitError", false, []).verdict, "inconclusive");
+  assert.equal(judgeShouldFail("unknown", true, []).verdict, "inconclusive");
+  assert.equal(judgeShouldFail("tesSUCCESS", true, []).verdict, "accepted");
+  assert.equal(judgeShouldFail("tesSUCCESS", false, []).verdict, "inconclusive");
 });
 
 test("amendments: coming soon unless every required amendment is enabled", () => {
   const amendments = parseFeatures({
     a: { name: "SingleAssetVault", enabled: true },
+    m: { name: "MPTokensV1", enabled: true },
     b: { name: "LendingProtocol", enabled: false },
     c: { name: "BatchV1_1", enabled: true },
   });
@@ -68,15 +77,22 @@ test("amendments: coming soon unless every required amendment is enabled", () =>
 });
 
 test("config: mainnet is refused", () => {
-  assert.throws(() => assertNotMainnetUrl("wss://xrplcluster.com"));
-  assert.throws(() => assertNotMainnetUrl("wss://s1.ripple.com"));
+  assert.throws(() => assertAllowedHost("wss://xrplcluster.com"));
+  assert.throws(() => assertAllowedHost("wss://s1.ripple.com"));
+  assert.throws(() => assertAllowedHost("wss://testnet.xrpl-labs.com.evil.example"));
+  assert.throws(() => assertAllowedHost("not a url"));
+  assert.doesNotThrow(() => assertAllowedHost("wss://testnet.xrpl-labs.com"));
+  assert.doesNotThrow(() => assertAllowedHost("wss://s.devnet.rippletest.net:51233"));
+  assert.doesNotThrow(() => assertAllowedHost("faucet.altnet.rippletest.net"));
+  assert.throws(() => loadConfig({ XRPL_WS: "wss://my-node.example.com" }), /not a known/);
   assert.throws(() => assertTestNetworkId(0, 1));
   assert.throws(() => assertTestNetworkId(undefined, 1));
   assert.throws(() => assertTestNetworkId(2, 1));
   assert.doesNotThrow(() => assertTestNetworkId(1, 1));
   assert.throws(() => loadConfig({ XRPL_NETWORK: "mainnet" }));
   assert.throws(() => loadConfig({ XRPL_WS: "wss://s2.ripple.com" }));
-  assert.equal(loadConfig({}).name, "testnet");
+  assert.equal(loadConfig({}).name, "devnet");
+  assert.equal(loadConfig({ XRPL_NETWORK: "testnet" }).name, "testnet");
 });
 
 test("levels: every level links xrpl.org docs; priority levels present", () => {
@@ -107,4 +123,9 @@ test("dashboard summaries are short and secret-free", async () => {
   assert.equal(summarize({ LedgerEntryType: "Credential", CredentialType: Buffer.from("DCH-KYC").toString("hex"), Flags: 0x10000 }), "DCH-KYC accepted");
   assert.equal(summarize({ LedgerEntryType: "Loan", PaymentRemaining: 0 }), "payments remaining 0");
   assert.equal(summarize({ LedgerEntryType: "Offer", DomainID: "AB" }), "in domain");
+});
+
+test("amendments: vault gate also needs MPTokensV1", () => {
+  const rep: AmendmentReport = { checkedAt: "", network: "devnet", amendments: parseFeatures({ a: { name: "SingleAssetVault", enabled: true } }) };
+  assert.ok(!featureEnabled(rep, "SingleAssetVault"));
 });

@@ -33,16 +33,23 @@ export function award(board: Scoreboard, levelId: string, part: Part): { board: 
   return { board: next, added: levelPoints(next[levelId]) - before };
 }
 
+export type Verdict = "rejected" | "accepted" | "inconclusive";
+
 /**
- * Did a should-fail attempt earn points? Only a ledger rejection counts.
- * tes* = accepted (bad: flag it, no points). tec/tem/tef/ter/tel = rejected.
- * Unexpected acceptance gets 0 points and is flagged as a bug for maintainers (no deduction).
+ * Did a should-fail attempt earn points? Only a FINAL ledger rejection counts.
+ * - tec*: rejected only when validated (it's in a validated ledger, fee charged, no effect).
+ * - tem* / tef* / tel*: rejected (refused at submission, never applied).
+ * - tes*: accepted when validated (a bug in the lesson: flag it, 0 points).
+ * - ter*, unvalidated tes/tec, submitError, unknown (timeouts, expired, queued):
+ *   inconclusive: 0 points, no flag, try again.
  */
-export function judgeShouldFail(engineResult: string, expected: readonly string[]): {
-  rejected: boolean;
+export function judgeShouldFail(engineResult: string, validated: boolean, expected: readonly string[]): {
+  verdict: Verdict;
   matchedExpected: boolean;
-  bug: boolean;
 } {
-  const rejected = !engineResult.startsWith("tes");
-  return { rejected, matchedExpected: expected.includes(engineResult), bug: !rejected };
+  let verdict: Verdict = "inconclusive";
+  if (/^te[fml][A-Z_]/.test(engineResult)) verdict = "rejected";
+  else if (engineResult.startsWith("tec") && validated) verdict = "rejected";
+  else if (engineResult.startsWith("tes") && validated) verdict = "accepted";
+  return { verdict, matchedExpected: verdict === "rejected" && expected.includes(engineResult) };
 }

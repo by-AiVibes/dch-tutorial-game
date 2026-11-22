@@ -47,13 +47,17 @@ async function runShouldFail(ctx: LevelContext): Promise<StepOutcome> {
   ctx.note("Batch where the accept can't succeed (wrong type): the create must not land either");
   const r = await submitBatch(ctx, half, hex("DCH-NONE"));
   const created = await ledgerEntry(ctx, { credential: { subject: ctx.address("holderBot"), issuer: ctx.address("issuer"), credential_type: half } });
-  const rejected = created === null;
+  // Counts as a correct rejection only if the outer Batch itself was validated tesSUCCESS
+  // (so the batch was really processed) AND the inner create did not land.
+  const processed = r.validated && r.engineResult === "tesSUCCESS";
+  const rejected = processed && created === null;
+  const verdict = !processed ? "inconclusive" : rejected ? "rejected" : "accepted";
   return {
     ok: true,
     message: `Batch outer result ${r.engineResult}; half-credential on ledger: ${!rejected}.`,
     results: [r],
     attempt: r,
-    verdict: { rejected, label: rejected ? `outer ${r.engineResult}, no inner tx applied` : "inner create applied" },
+    verdict: { verdict, label: !processed ? `outer Batch ${r.engineResult}, not validated` : rejected ? `outer ${r.engineResult}, no inner tx applied` : "inner create applied" },
   };
 }
 

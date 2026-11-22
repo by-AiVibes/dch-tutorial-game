@@ -30,7 +30,9 @@ export async function submitBlob(client: Client, blob: string, hash: string, typ
     const meta = res.result.meta as Meta | undefined;
     return { hash: res.result.hash, engineResult: meta?.TransactionResult ?? "unknown", validated: res.result.validated === true, type, account, at, created: createdEntries(meta) };
   } catch (err) {
-    // tem/tef/tel results are rejected before a ledger includes them; xrpl.js throws for those.
+    // tem/tef/tel results are refused before a ledger includes them; xrpl.js throws for those.
+    // Anything else here (timeout, expired LastLedgerSequence, queued) is NOT a final result:
+    // it is reported as submitError / unvalidated so scoring treats it as inconclusive.
     const msg = err instanceof Error ? err.message : String(err);
     const code = /\b(te[cfmlr][A-Z_]+)\b/.exec(msg)?.[1] ?? "submitError";
     return { hash, engineResult: code, validated: false, type, account, at };
@@ -53,7 +55,7 @@ export async function fundNew(client: Client, cfg: NetworkConfig, retries = 1): 
       return wallet;
     } catch (err) {
       // Public faucets rate-limit and hiccup; retry once after a pause, then give up cleanly.
-      if (attempt >= retries) throw new Error(`Faucet ${cfg.faucetHost} failed: ${err instanceof Error ? err.message : err}. The previous world is unchanged; try reset-world again later.`);
+      if (attempt >= retries) throw new Error(`Faucet ${cfg.faucetHost} failed: ${err instanceof Error ? err.message : err}.`);
       await new Promise((r) => setTimeout(r, 5000));
     }
   }

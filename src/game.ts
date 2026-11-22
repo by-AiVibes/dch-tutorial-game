@@ -104,10 +104,14 @@ export class Game {
     return this.exclusive(async () => {
       const client = await this.ledger();
       const accounts: WorldState["accounts"] = {};
-      for (const k of WORLD_ACCOUNTS) {
-        this.log(`funding ${k} from the ${this.cfg.name} faucet`);
-        const w = await fundNew(client, this.cfg);
-        accounts[k] = { address: w.address, seed: w.seed as string };
+      try {
+        for (const k of WORLD_ACCOUNTS) {
+          this.log(`funding ${k} from the ${this.cfg.name} faucet`);
+          const w = await fundNew(client, this.cfg);
+          accounts[k] = { address: w.address, seed: w.seed as string };
+        }
+      } catch (e) {
+        throw new Error(`${(e as Error).message} The previous world is unchanged; try reset-world again later.`);
       }
       const amendments = await checkAmendments(client, this.cfg.name);
       this.state = {
@@ -169,7 +173,12 @@ export class Game {
         ensureAccount: async (k) => {
           if (!this.state.accounts[k]) {
             this.log(`funding ${k} from the ${this.cfg.name} faucet`);
-            const w = await fundNew(client, this.cfg);
+            let w;
+            try {
+              w = await fundNew(client, this.cfg);
+            } catch (e) {
+              throw new Error(`Couldn't fund the ${k} account this level needs. ${(e as Error).message} Try the level again in a minute.`);
+            }
             this.state.accounts[k] = { address: w.address, seed: w.seed as string };
             save(this.state);
           }
@@ -188,16 +197,18 @@ export class Game {
       }
       if (part === "shouldFail" && out.attempt) {
         const j = out.verdict
-          ? { rejected: out.verdict.rejected, matchedExpected: true, bug: !out.verdict.rejected }
-          : judgeShouldFail(out.attempt.engineResult, level.expectedRejects);
+          ? { verdict: out.verdict.verdict, matchedExpected: true }
+          : judgeShouldFail(out.attempt.engineResult, out.attempt.validated, level.expectedRejects);
         const label = out.verdict?.label ?? out.attempt.engineResult;
-        if (j.rejected) {
+        if (j.verdict === "rejected") {
           ({ board: this.state.scores, added } = award(this.state.scores, levelId, "shouldFail"));
           message = `Rejected, as it should be (${label}). ${level.rejectReason}`;
-          if (!j.matchedExpected) message += ` Note: expected one of ${level.expectedRejects.join(", ")}.`;
-        } else {
+          if (!j.matchedExpected && level.expectedRejects.length) message += ` Note: expected one of ${level.expectedRejects.join(", ")}.`;
+        } else if (j.verdict === "accepted") {
           this.state.bugs.push(`${levelId}: should-fail was accepted (${out.attempt.hash})`);
           message = `Unexpected: the ledger accepted it (${label}). No points; flagged for maintainers.`;
+        } else {
+          message = `Inconclusive (${label}): the attempt never reached a final ledger result (network, queue or timeout). No points; try again.`;
         }
       }
       save(this.state);

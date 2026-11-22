@@ -21,28 +21,31 @@ npm start                           # dashboard on http://127.0.0.1:8790
 
 Other commands: `npm run dch -- amendments` (live amendment check), `npm run dch -- play-all`
 (every playable level in order — the end-to-end smoke), `npm run dch -- status`,
-`npm test` (fast unit tests, no network), `npm run typecheck`.
+`npm test` (fast unit tests, no network), `npm run typecheck`. A ready GitHub Actions CI
+workflow (npm ci, typecheck, tests on Node 24) is in `ci/github-actions-ci.yml`; move it to
+`.github/workflows/ci.yml` to turn it on.
 
 ### Configuration (environment)
 
 | Variable | Default | Notes |
 |---|---|---|
-| `XRPL_NETWORK` | `testnet` | `testnet` or `devnet`. Anything else is refused. |
-| `XRPL_WS` | Ripple's public test server for the network | Any test-network WebSocket, e.g. `wss://testnet.xrpl-labs.com` or `wss://devnet.xrpl-labs.com` (port 443, useful where 51233 is blocked). Mainnet URLs and `network_id` 0 are refused. |
+| `XRPL_NETWORK` | `devnet` | `devnet` (default) or `testnet`. Anything else is refused. |
+| `XRPL_WS` | Ripple's public test server for the network | Must be a known test host (allowlist in `src/config.ts`), e.g. `wss://testnet.xrpl-labs.com` or `wss://devnet.xrpl-labs.com` (port 443, useful where 51233 is blocked). Other hosts are refused, and the server must report `network_id` 2 (devnet) or 1 (testnet). |
 | `XRPL_FAUCET_HOST` | the network's public faucet | |
 | `PORT` / `HOST` | `8790` / `127.0.0.1` | Dashboard server. |
 | `DCH_ALLOW_HTTP_RESET` | off | Set `1` to allow the dashboard's Reset button (spends faucet requests). |
 | `DCH_DATA_DIR` | `.data` | World state. Holds throwaway test seeds: gitignored, mode 0600, never sent to the browser or printed. |
 
-**Which network?** As of Nov 21 2026 the live check shows every level's amendments enabled on
-**devnet**; on testnet, levels 6–7 show coming soon. A full devnet run scored 140/140 — see
+**Which network?** The default is **devnet**: as of Nov 21 2026 the live check shows every
+level's amendments enabled there. Testnet stays selectable with `XRPL_NETWORK=testnet`; there,
+levels 6–7 show coming soon. A full devnet run scored 140/140 — see
 [docs/SMOKE.md](docs/SMOKE.md).
 
 ## How it plays
 
 - **Seats:** issuer, holder, lender, borrower, auditor. Claim one with your name; leave it and a bot takes it back. If a level's seats are all bots, anyone can drive the demo.
 - **reset-world:** funds a fresh set of faucet accounts (five seats plus a holder bot), puts bots in every seat, clears scores and recent results, and re-checks amendments. Safe to re-run: the old world is replaced only after all funding succeeds.
-- **Scoring:** 10 for a goal, 5 for a correctly rejected should-fail, +5 when both are done. Once per world. Seven scored levels, max 140. If a should-fail is *accepted*, it scores 0 and is flagged for maintainers.
+- **Scoring:** 10 for a goal, 5 for a correctly rejected should-fail, +5 when both are done. Once per world. Seven scored levels, max 140. Only a *final* rejection counts (validated `tec`, or `tem`/`tef`/`tel`). Timeouts, queued or unvalidated results are *inconclusive*: 0 points, try again. If a should-fail is *accepted*, it scores 0 and is flagged for maintainers.
 - **Amendment gating:** before a level relies on an amendment, the game asks the connected server with the [`feature`](https://xrpl.org/docs/references/http-websocket-apis/admin-api-methods/status-and-debugging-methods/feature) method. If it is not enabled there, the level shows **coming soon** instead of failing. See [Amendments](https://xrpl.org/docs/concepts/networks-and-servers/amendments) and [Known Amendments](https://xrpl.org/resources/known-amendments).
 
 ## Levels
@@ -123,7 +126,7 @@ sending transactions.
 ### Levels 6 and 7: vault and lending (devnet smoke, world 1, Nov 21 2026)
 
 On Nov 21 2026 the live check showed SingleAssetVault and LendingProtocol **enabled on devnet,
-not on testnet**, so run these with `XRPL_NETWORK=devnet` (on testnet they show coming soon).
+not on testnet**. Devnet is the default network, so these play out of the box (on testnet they show coming soon).
 
 - **Vault.** The lender opens an XRP vault; the holder deposits 10 XRP and the holder bot 5 XRP
   (each gets vault shares); the holder withdraws its 10 XRP; the vault keeps 5 XRP

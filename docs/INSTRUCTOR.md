@@ -4,8 +4,8 @@ A 45–60 minute session for developers who know basic XRPL concepts (accounts, 
 
 ## Before the session
 
-1. `npm install`, then pick a network. For all seven levels use devnet
-   (`XRPL_NETWORK=devnet`); check first with `npm run dch -- amendments`. A level whose
+1. `npm install`. The default network is devnet, where all seven levels play; testnet is
+   available with `XRPL_NETWORK=testnet`. Check first with `npm run dch -- amendments`. A level whose
    amendment isn't enabled shows **coming soon**, never an error.
 2. `npm run dch -- reset-world` (about 30–60 s: six faucet accounts). If the faucet is busy, the
    command fails cleanly and the previous world stays; run it again in a minute.

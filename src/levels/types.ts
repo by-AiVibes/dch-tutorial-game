@@ -2,6 +2,7 @@ import type { Client, Wallet } from "xrpl";
 import type { NetworkConfig } from "../config.ts";
 import type { TxResult } from "../ledger.ts";
 import type { Role } from "../seats.ts";
+import type { Verdict } from "../scoring.ts";
 
 /** Seat accounts, the holder bot, and extra accounts a level funds lazily (e.g. "clawIssuer"). */
 export type AccountKey = Role | "holderBot" | "clawIssuer";
@@ -36,7 +37,7 @@ export interface StepOutcome {
    * Optional verdict when the engine result alone can't tell (e.g. a Batch's outer tx is
    * tesSUCCESS even when its all-or-nothing inner transactions were rolled back).
    */
-  verdict?: { rejected: boolean; label: string };
+  verdict?: { verdict: Verdict; label: string };
 }
 
 export interface LevelDef {

@@ -1,4 +1,5 @@
-// Network config. Test networks only: mainnet is refused twice (by URL and by network_id).
+// Network config. Test networks only: hosts must be on a test-host allowlist, and the
+// server must report network_id 1 (testnet) or 2 (devnet); mainnet is 0.
 
 export type NetworkName = "testnet" | "devnet";
 
@@ -30,19 +31,29 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
   },
 };
 
-const MAINNET_HINTS = [
-  "xrplcluster.com",
-  "s1.ripple.com",
-  "s2.ripple.com",
-  "xrpl.ws",
-  "xrpl.link",
-  "mainnet",
+/** Only known public test-network hosts are allowed (WebSocket servers and faucets). */
+export const ALLOWED_HOSTS = [
+  "testnet.xrpl-labs.com",
+  "devnet.xrpl-labs.com",
+  "s.altnet.rippletest.net",
+  "s.devnet.rippletest.net",
+  "clio.altnet.rippletest.net",
+  "clio.devnet.rippletest.net",
+  "faucet.altnet.rippletest.net",
+  "faucet.devnet.rippletest.net",
 ];
 
-export function assertNotMainnetUrl(url: string): void {
-  const u = url.toLowerCase();
-  if (MAINNET_HINTS.some((h) => u.includes(h))) {
-    throw new Error(`Refusing ${url}: looks like an XRPL mainnet endpoint. Test networks only.`);
+function hostOf(urlOrHost: string): string {
+  try {
+    return new URL(urlOrHost.includes("://") ? urlOrHost : `https://${urlOrHost}`).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+export function assertAllowedHost(urlOrHost: string): void {
+  if (!ALLOWED_HOSTS.includes(hostOf(urlOrHost))) {
+    throw new Error(`Refusing ${urlOrHost}: not a known XRPL test-network host (allowed: ${ALLOWED_HOSTS.join(", ")}).`);
   }
 }
 
@@ -56,13 +67,13 @@ export function assertTestNetworkId(id: number | undefined, expected: number): v
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): NetworkConfig {
-  const name = (env.XRPL_NETWORK ?? "testnet") as NetworkName;
+  const name = (env.XRPL_NETWORK ?? "devnet") as NetworkName; // devnet default: every level playable (Dave, Nov 21 2026)
   const base = NETWORKS[name];
   if (!base) throw new Error(`XRPL_NETWORK must be "testnet" or "devnet", got "${name}".`);
   const ws = env.XRPL_WS || base.ws;
-  assertNotMainnetUrl(ws);
+  assertAllowedHost(ws);
   const faucetHost = env.XRPL_FAUCET_HOST || base.faucetHost;
-  assertNotMainnetUrl(faucetHost);
+  assertAllowedHost(faucetHost);
   return { ...base, ws, faucetHost };
 }
 

@@ -49,10 +49,6 @@ export function releaseSeat(seats: Seats, role: Role, player: string): Seats {
   return next;
 }
 
-export function whoPlays(seats: Seats, role: Role): "human" | "bot" {
-  return seats[role].player ? "human" : "bot";
-}
-
 /**
  * Can this player act for these roles? A level step lists the seats that may run it.
  * Bot-only worlds (no human seats) let anyone drive the demo; otherwise you must hold one of the roles.

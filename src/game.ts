@@ -19,6 +19,9 @@ export class Game {
   private state: WorldState;
   private queue: Promise<unknown> = Promise.resolve();
   private client: Client | null = null;
+  /** Read-only lookups (balances, objects) skip the level queue but have their own small cap. */
+  private readGate = new QueueGate(Number(process.env.DCH_MAX_READS) > 0 ? Number(process.env.DCH_MAX_READS) : 4);
+  private connecting: Promise<Client> | null = null;
   private gate = new QueueGate(Number(process.env.DCH_MAX_QUEUE) > 0 ? Number(process.env.DCH_MAX_QUEUE) : 8);
   readonly cfg: NetworkConfig;
   log: (msg: string) => void;
@@ -46,8 +49,9 @@ export class Game {
 
   private async ledger(): Promise<Client> {
     if (this.client?.isConnected()) return this.client;
-    this.client = await connect(this.cfg);
-    return this.client;
+    // One connection attempt at a time, even with concurrent read-only lookups.
+    this.connecting ??= connect(this.cfg).then((c) => (this.client = c)).finally(() => (this.connecting = null));
+    return this.connecting;
   }
 
   async close(): Promise<void> {
@@ -100,7 +104,7 @@ export class Game {
 
   /** Level 0: live balance and reserve for a player's address (address only; read-only). */
   account(address: string) {
-    return this.exclusive(async () => {
+    return this.readGate.run(async () => {
       const client = await this.ledger();
       const si = await client.request({ command: "server_info" });
       const vl = si.result.info.validated_ledger;
@@ -252,7 +256,7 @@ export class Game {
    * brokers, loans, offers, trust lines), for the dashboard. Read-only.
    */
   objects() {
-    return this.exclusive(async () => {
+    return this.readGate.run(async () => {
       const client = await this.ledger();
       const out: Array<{ owner: string; type: string; id: string; detail: string }> = [];
       for (const [k, a] of Object.entries(this.state.accounts)) {

@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 // Second-layer abuse protection (the reverse proxy is the first layer):
 // per-IP fixed-window rate limits by endpoint class, and a cap on queued ledger work.
 
@@ -9,12 +11,13 @@ export interface LimitRule {
   globalMax?: number;
 }
 
-export type LimitClass = "read" | "heavy" | "reset";
+export type LimitClass = "read" | "account" | "heavy" | "reset";
 
-/** Defaults; override with DCH_RL_<CLASS>_MAX / DCH_RL_<CLASS>_WINDOW_MS. */
+/** Defaults; override with DCH_RL_<CLASS>_MAX / DCH_RL_<CLASS>_WINDOW_MS (e.g. for a workshop behind one NAT). */
 export const DEFAULT_RULES: Record<LimitClass, LimitRule> = {
   read: { max: 120, windowMs: 60_000 }, // state, static, seats
-  heavy: { max: 12, windowMs: 60_000 }, // level runs, /api/objects, /api/account, amendments
+  account: { max: 60, windowMs: 60_000 }, // Level 0 balance polling
+  heavy: { max: 12, windowMs: 60_000 }, // level runs, /api/objects, /api/amendments
   reset: { max: 2, windowMs: 3_600_000, globalMax: 6 }, // reset-world spends faucet requests
 };
 
@@ -30,16 +33,38 @@ export function rulesFromEnv(env: NodeJS.ProcessEnv = process.env): Record<Limit
 }
 
 /** Which class a request falls into. */
-export function classify(method: string, path: string): LimitClass {
+export function classify(_method: string, path: string): LimitClass {
   if (path === "/api/reset-world") return "reset";
-  if (path === "/api/objects" || path.startsWith("/api/account/") || path === "/api/amendments" || path.startsWith("/api/levels/")) return "heavy";
+  if (path.startsWith("/api/account/")) return "account";
+  if (path === "/api/objects" || path === "/api/amendments" || path.startsWith("/api/levels/")) return "heavy";
   return "read";
 }
 
+/**
+ * Rate-limit key for an IP: IPv4 as-is (v4-mapped IPv6 unwrapped), IPv6 bucketed by /64
+ * (one host usually owns a whole /64). Anything that isn't an IP becomes "unknown", so
+ * keys are always short.
+ */
+export function ipKey(ip: string): string {
+  let a = ip.trim();
+  if (a.toLowerCase().startsWith("::ffff:") && isIP(a.slice(7)) === 4) a = a.slice(7);
+  const v = isIP(a);
+  if (v === 4) return a;
+  if (v !== 6) return "unknown";
+  const [head, tail = ""] = a.toLowerCase().split("%")[0].split("::");
+  const h = head ? head.split(":") : [];
+  const t = a.includes("::") ? (tail ? tail.split(":") : []) : [];
+  const full = a.includes("::") ? [...h, ...Array(8 - h.length - t.length).fill("0"), ...t] : h;
+  return full.slice(0, 4).map((x) => x.replace(/^0+(?=.)/, "")).join(":") + "::/64";
+}
+
+type Entry = { start: number; count: number };
+
 export class RateLimiter {
-  private hits = new Map<string, { start: number; count: number }>();
-  private global = new Map<LimitClass, { start: number; count: number }>();
-  private lastSweep = 0;
+  /** One map per class, so each class expires on its own window. Insertion order = oldest first. */
+  private hits = new Map<LimitClass, Map<string, Entry>>();
+  private global = new Map<LimitClass, Entry>();
+  private lastSweep = new Map<LimitClass, number>();
   private rules: Record<LimitClass, LimitRule>;
   private now: () => number;
   private maxKeys: number;
@@ -49,41 +74,66 @@ export class RateLimiter {
     this.maxKeys = maxKeys;
   }
 
-  /** Returns 0 if allowed, else seconds until the window resets. */
+  /** Returns 0 if allowed, else whole seconds until this request could succeed. */
   check(ip: string, cls: LimitClass): number {
     const t = this.now();
     const rule = this.rules[cls];
-    this.sweep(t);
+    const map = this.mapFor(cls);
+    if (t - (this.lastSweep.get(cls) ?? 0) >= Math.min(rule.windowMs, 60_000)) this.sweep(cls, t);
     if (rule.globalMax) {
-      const g = this.global.get(cls);
-      if (!g || t - g.start >= rule.windowMs) this.global.set(cls, { start: t, count: 0 });
-      const gg = this.global.get(cls)!;
-      if (gg.count >= rule.globalMax) return Math.ceil((gg.start + rule.windowMs - t) / 1000);
+      let g = this.global.get(cls);
+      if (!g || t - g.start >= rule.windowMs) this.global.set(cls, (g = { start: t, count: 0 }));
+      if (g.count >= rule.globalMax) return secs(g.start + rule.windowMs - t);
     }
-    const key = `${cls}|${ip}`;
-    let e = this.hits.get(key);
-    if (!e || t - e.start >= rule.windowMs) {
-      if (!e && this.hits.size >= this.maxKeys) return Math.ceil(rule.windowMs / 1000); // memory cap under a flood
+    const key = ipKey(ip);
+    let e = map.get(key);
+    if (e && t - e.start >= rule.windowMs) {
+      map.delete(key); // re-insert below so order stays oldest-first
+      e = undefined;
+    }
+    if (!e) {
+      if (map.size >= this.maxKeys) {
+        this.sweep(cls, t); // expire first; only refuse if the table is still full
+        if (map.size >= this.maxKeys) {
+          const oldest = map.values().next().value as Entry;
+          return secs(oldest.start + rule.windowMs - t); // real wait until a slot frees
+        }
+      }
       e = { start: t, count: 0 };
-      this.hits.set(key, e);
+      map.set(key, e);
     }
-    if (e.count >= rule.max) return Math.ceil((e.start + rule.windowMs - t) / 1000);
+    if (e.count >= rule.max) return secs(e.start + rule.windowMs - t);
     e.count++;
     if (rule.globalMax) this.global.get(cls)!.count++;
     return 0;
   }
 
-  private sweep(t: number) {
-    if (t - this.lastSweep < 60_000) return;
-    this.lastSweep = t;
-    const longest = Math.max(...Object.values(this.rules).map((r) => r.windowMs));
-    for (const [k, v] of this.hits) if (t - v.start >= longest) this.hits.delete(k);
+  private mapFor(cls: LimitClass) {
+    let m = this.hits.get(cls);
+    if (!m) this.hits.set(cls, (m = new Map()));
+    return m;
   }
 
-  get size() {
-    return this.hits.size;
+  private sweep(cls: LimitClass, t: number) {
+    this.lastSweep.set(cls, t);
+    const win = this.rules[cls].windowMs;
+    const m = this.mapFor(cls);
+    for (const [k, v] of m) {
+      if (t - v.start >= win) m.delete(k);
+      else break; // oldest-first: the rest are newer
+    }
+  }
+
+  /** Tracked keys (all classes, or one). */
+  size(cls?: LimitClass): number {
+    if (cls) return this.mapFor(cls).size;
+    let n = 0;
+    for (const m of this.hits.values()) n += m.size;
+    return n;
   }
 }
+
+const secs = (ms: number) => Math.max(1, Math.ceil(ms / 1000));
 
 /** Caps how much ledger work can wait in the engine's single queue. */
 export class QueueGate {
@@ -109,14 +159,26 @@ export class BusyError extends Error {
   }
 }
 
+const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
 /**
- * Client IP. Behind a trusted local reverse proxy (TRUST_PROXY=1), use the last
- * X-Forwarded-For hop (the one the proxy appended); otherwise the socket address.
+ * Client IP. Proxy headers are trusted only when TRUST_PROXY is on AND the socket peer is
+ * loopback (i.e. the local reverse proxy). Prefer X-Real-IP (Caddy: header_up X-Real-IP
+ * {remote_host}), else the last X-Forwarded-For hop. Values must pass net.isIP(); otherwise
+ * fall back to the socket address.
  */
-export function clientIp(remote: string | undefined, xff: string | string[] | undefined, trustProxy: boolean): string {
-  if (trustProxy && xff) {
-    const parts = (Array.isArray(xff) ? xff.join(",") : xff).split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1];
-  }
-  return remote ?? "unknown";
+export function clientIp(
+  remote: string | undefined,
+  headers: { "x-real-ip"?: string | string[]; "x-forwarded-for"?: string | string[] },
+  trustProxy: boolean,
+): string {
+  const sock = remote ?? "unknown";
+  if (!trustProxy || !LOOPBACK.has(sock)) return sock;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v.join(",") : v ?? "");
+  const real = one(headers["x-real-ip"]).trim();
+  if (real && isIP(real)) return real;
+  const hops = one(headers["x-forwarded-for"]).split(",").map((x) => x.trim()).filter(Boolean);
+  const last = hops[hops.length - 1];
+  if (last && isIP(last)) return last;
+  return sock;
 }

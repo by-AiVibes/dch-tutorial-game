@@ -16,6 +16,11 @@ const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".j
 /** reset-world spends faucet requests; allow it over HTTP only when explicitly enabled. */
 const ALLOW_HTTP_RESET = process.env.DCH_ALLOW_HTTP_RESET === "1";
 
+function sendBusy(res: ServerResponse, message: string) {
+  res.writeHead(503, { "content-type": "application/json", "retry-after": "5", "cache-control": "no-store" });
+  res.end(JSON.stringify({ error: message, retryAfterSeconds: 5 }));
+}
+
 function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
   res.end(JSON.stringify(body));
@@ -48,14 +53,14 @@ export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv
     } catch {
       /* handled as invalid_url below */
     }
-    const ip = clientIp(req.socket.remoteAddress, req.headers["x-forwarded-for"], trustProxy);
+    const ip = clientIp(req.socket.remoteAddress, { "x-real-ip": req.headers["x-real-ip"], "x-forwarded-for": req.headers["x-forwarded-for"] }, trustProxy);
     const wait = limiter.check(ip, classify(req.method ?? "GET", path));
     if (wait > 0) {
       res.writeHead(429, { "content-type": "application/json", "retry-after": String(wait), "cache-control": "no-store" });
       return res.end(JSON.stringify({ error: "rate_limited", retryAfterSeconds: wait }));
     }
     handle(game, req, res).catch((e) =>
-      e instanceof BusyError ? send(res, 503, { error: e.message }) : send(res, 400, { error: e instanceof Error ? e.message : String(e) }),
+      e instanceof BusyError ? sendBusy(res, e.message) : send(res, 400, { error: e instanceof Error ? e.message : String(e) }),
     );
   };
 }

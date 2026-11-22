@@ -3,7 +3,8 @@ import type { NetworkConfig } from "../config.ts";
 import type { TxResult } from "../ledger.ts";
 import type { Role } from "../seats.ts";
 
-export type AccountKey = Role | "holderBot";
+/** Seat accounts, the holder bot, and extra accounts a level funds lazily (e.g. "clawIssuer"). */
+export type AccountKey = Role | "holderBot" | "clawIssuer";
 
 export interface LevelContext {
   client: Client;
@@ -13,6 +14,12 @@ export interface LevelContext {
   /** Submit as an account; result is recorded on the dashboard. */
   submit: (k: AccountKey, tx: Record<string, unknown>) => Promise<TxResult>;
   note: (msg: string) => void;
+  /** Record a result submitted outside ctx.submit (e.g. a co-signed Batch). */
+  record: (r: TxResult, who: string) => void;
+  /** Fund an extra test account from the faucet the first time a level needs it (kept for this world). */
+  ensureAccount: (k: AccountKey) => Promise<string>;
+  /** Memo of another level in this world (read-only use: prerequisites). */
+  memoOf: (levelId: string) => Record<string, unknown>;
   /** Per-world scratch memory for this level (persisted). */
   memo: Record<string, unknown>;
 }
@@ -23,6 +30,11 @@ export interface StepOutcome {
   results: TxResult[];
   /** For should-fail: the engine result of the attempt that should be rejected. */
   attempt?: TxResult;
+  /**
+   * Optional verdict when the engine result alone can't tell (e.g. a Batch's outer tx is
+   * tesSUCCESS even when its all-or-nothing inner transactions were rolled back).
+   */
+  verdict?: { rejected: boolean; label: string };
 }
 
 export interface LevelDef {

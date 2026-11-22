@@ -2,16 +2,20 @@
 // enabled on the connected network show "coming soon" (checked at runtime, never assumed).
 
 import { level1 } from "./level1.ts";
+import { level2Runners } from "./level2.ts";
+import { level3Runners } from "./level3.ts";
+import { level5Runners } from "./level5.ts";
 import type { LevelDef } from "./types.ts";
 
 const planned = (d: Omit<LevelDef, "runGoal" | "runShouldFail">): LevelDef => d;
+const live = (d: Omit<LevelDef, "runGoal" | "runShouldFail">, r: Pick<LevelDef, "runGoal" | "runShouldFail">): LevelDef => ({ ...d, ...r });
 
 export const LEVELS: LevelDef[] = [
   level1,
-  planned({
+  live({
     id: "freeze", n: 2, title: "Freeze and clawback", feature: "Clawback",
-    goal: "As the issuer, freeze a flagged holder, then claw back issued funds on a currency that has clawback enabled.",
-    shouldFail: "Try a clawback on a currency that never enabled clawback, or send the clawback from a non-issuer.",
+    goal: "A fresh issuer enables clawback, issues CLW to a holder bot, freezes the flagged line, then claws the CLW back.",
+    shouldFail: "The Level 1 issuer, which never enabled clawback, tries to claw back TST from the holder.",
     rejectReason: "Clawback is refused unless the issuer enabled it, and only the issuer can submit it.",
     expectedRejects: ["tecNO_PERMISSION", "temMALFORMED"],
     goalRoles: ["issuer"], shouldFailRoles: ["issuer", "holder", "auditor"],
@@ -20,17 +24,17 @@ export const LEVELS: LevelDef[] = [
       { title: "Freezing tokens", href: "https://xrpl.org/docs/concepts/tokens/fungible-tokens/freezes" },
       { title: "Clawing back tokens", href: "https://xrpl.org/docs/concepts/tokens/fungible-tokens/clawing-back-tokens" },
     ],
-  }),
-  planned({
+  }, level2Runners),
+  live({
     id: "creds", n: 3, title: "Issue and accept a credential", feature: "Credentials",
     goal: "The issuer creates a credential; the holder accepts it so the credential is live.",
-    shouldFail: "Accept a credential that was not issued to you.",
+    shouldFail: "The holder bot tries to accept the DCH-KYC credential that was issued to the holder.",
     rejectReason: "Only the credential's subject can accept it, and it is not in force until accepted.",
     expectedRejects: ["tecNO_ENTRY", "tecNO_PERMISSION"],
     goalRoles: ["issuer", "holder"], shouldFailRoles: ["holder", "auditor"],
     bots: "The other seat is filled by a bot so create and accept can still complete.",
     docs: [{ title: "Credentials", href: "https://xrpl.org/docs/concepts/decentralized-storage/credentials" }],
-  }),
+  }, level3Runners),
   planned({
     id: "domain", n: 4, title: "Open a permissioned domain", feature: "PermissionedDomains",
     goal: "Create a domain that admits only the accepted credential, then show the holder qualifies.",
@@ -41,16 +45,16 @@ export const LEVELS: LevelDef[] = [
     bots: "A credentialed holder bot joins cleanly. An uncredentialed bot is refused.",
     docs: [{ title: "Permissioned domains", href: "https://xrpl.org/docs/concepts/tokens/decentralized-exchange/permissioned-domains" }],
   }),
-  planned({
+  live({
     id: "batch", n: 5, title: "Batch: create plus accept", feature: "Batch",
-    goal: "Submit one batch whose inner transactions land together or not at all.",
-    shouldFail: "Submit an all-or-nothing batch where one inner transaction cannot succeed.",
-    rejectReason: "In all-or-nothing mode, if one inner transaction fails, none apply.",
-    expectedRejects: ["tecBATCH_FAILURE"],
+    goal: "Submit one all-or-nothing batch: the issuer creates a credential and the holder bot accepts it, co-signed.",
+    shouldFail: "Submit an all-or-nothing batch whose accept cannot succeed (wrong credential type).",
+    rejectReason: "In all-or-nothing mode, if one inner transaction fails, none apply. The outer Batch can still be tesSUCCESS (it pays the fee), so we check that the create did not land.",
+    expectedRejects: [],
     goalRoles: ["issuer", "holder"], shouldFailRoles: ["issuer", "holder"],
     bots: "The counterparty bot signs its half of the batch.",
     docs: [{ title: "Batch transactions", href: "https://xrpl.org/docs/concepts/transactions/batch-transactions" }],
-  }),
+  }, level5Runners),
   planned({
     id: "vault", n: 6, title: "Deposit in a single-asset vault", feature: "SingleAssetVault", priority: true,
     goal: "Deposit the test token into a vault, receive shares, and withdraw only your share.",

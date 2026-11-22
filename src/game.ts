@@ -160,7 +160,25 @@ export class Game {
           return r;
         },
         note: (m) => this.log(m),
+        record: (r, who) => {
+          this.record({ ...r, level: levelId, part, note: who });
+          this.log(`${r.type} by ${who}: ${r.engineResult} ${r.hash}`);
+        },
+        memoOf: (id) => (this.state.memos[id] ??= {}),
+        ensureAccount: async (k) => {
+          if (!this.state.accounts[k]) {
+            this.log(`funding ${k} from the ${this.cfg.name} faucet`);
+            const w = await fundNew(client, this.cfg);
+            this.state.accounts[k] = { address: w.address, seed: w.seed as string };
+            save(this.state);
+          }
+          return this.state.accounts[k].address;
+        },
       };
+      const already = this.state.scores[levelId]?.[part];
+      if (already) {
+        return { ok: true, message: "Already cleared in this world. Reset the world to play it again.", added: 0, results: [], view: this.view() };
+      }
       const out = await run(ctx);
       let added = 0;
       let message = out.message;
@@ -168,14 +186,17 @@ export class Game {
         ({ board: this.state.scores, added } = award(this.state.scores, levelId, "goal"));
       }
       if (part === "shouldFail" && out.attempt) {
-        const j = judgeShouldFail(out.attempt.engineResult, level.expectedRejects);
+        const j = out.verdict
+          ? { rejected: out.verdict.rejected, matchedExpected: true, bug: !out.verdict.rejected }
+          : judgeShouldFail(out.attempt.engineResult, level.expectedRejects);
+        const label = out.verdict?.label ?? out.attempt.engineResult;
         if (j.rejected) {
           ({ board: this.state.scores, added } = award(this.state.scores, levelId, "shouldFail"));
-          message = `Rejected, as it should be (${out.attempt.engineResult}). ${level.rejectReason}`;
+          message = `Rejected, as it should be (${label}). ${level.rejectReason}`;
           if (!j.matchedExpected) message += ` Note: expected one of ${level.expectedRejects.join(", ")}.`;
         } else {
           this.state.bugs.push(`${levelId}: should-fail was accepted (${out.attempt.hash})`);
-          message = `Unexpected: the ledger accepted it (${out.attempt.engineResult}). No points; flagged for maintainers.`;
+          message = `Unexpected: the ledger accepted it (${label}). No points; flagged for maintainers.`;
         }
       }
       save(this.state);

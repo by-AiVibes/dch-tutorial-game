@@ -45,10 +45,10 @@ Other commands: `npm run dch -- amendments` (live amendment check), `npm run dch
 | # | Level | Needs | Status |
 |---|---|---|---|
 | 1 | Issue a token, keep rippling off | core rules | **playable** |
-| 2 | Freeze and clawback | Clawback | next slice |
-| 3 | Issue and accept a credential | Credentials | next slice |
+| 2 | Freeze and clawback | Clawback | **playable** |
+| 3 | Issue and accept a credential | Credentials | **playable** |
 | 4 | Open a permissioned domain | PermissionedDomains | planned |
-| 5 | Batch: create plus accept | Batch | next slice |
+| 5 | Batch: create plus accept | Batch (or BatchV1_1) | **playable** |
 | 6 | Deposit in a single-asset vault | SingleAssetVault | **priority**, gated |
 | 7 | Fund a loan and repay it | SingleAssetVault + LendingProtocol | **priority**, gated |
 | 8 | Explainer: confidential MPT transfers | ConfidentialTransfer | **priority**, read-only until enabled |
@@ -79,6 +79,32 @@ Smoke run on testnet (world 1, Nov 21 2026):
 | Holder TrustSet NoRipple | tesSUCCESS | [4902868B…](https://testnet.xrpl.org/transactions/4902868B96682D72F52651962235ED6A4BD2120A7695F8AD096F0EDEE2C8C232) |
 | Holder→holder via issuer | tesSUCCESS | [D31330FD…](https://testnet.xrpl.org/transactions/D31330FD3BFB94E91B5B557C4D3A9E56A61A182638B908566EB6F526254620B0) |
 | Should-fail: route through holder | **tecPATH_DRY** | [9EF4F641…](https://testnet.xrpl.org/transactions/9EF4F641AF4FDB19369EDA3C28E67040F216063621E234042F7C726CD54F048B) |
+
+### Levels 2, 3 and 5 (testnet smoke, world 1, Nov 21 2026)
+
+- **Freeze and clawback.** Clawback has to be enabled while the issuer owns no ledger objects
+  ([docs](https://xrpl.org/docs/concepts/tokens/fungible-tokens/clawing-back-tokens)), so a
+  fresh `clawIssuer` is funded the first time the level runs. In a Clawback, `Amount.issuer` is
+  the *holder*. Goal: enable → trust → issue 50 CLW → freeze → claw back
+  ([Clawback 7F6D25C9…](https://testnet.xrpl.org/transactions/7F6D25C97D637F321A56E4C3F48E555EB34A9996A65D329CC3FBC3BBEE733B74)).
+  Should-fail: the Level 1 issuer never enabled clawback →
+  [`tecNO_PERMISSION`](https://testnet.xrpl.org/transactions/DCC5AE6160D0AAD29219808D0D824D4FB5F7113C169A852143E42C24165E0071).
+- **Credentials.** Issuer creates `DCH-KYC` for the holder; it is not in force until the holder
+  accepts it ([docs](https://xrpl.org/docs/concepts/decentralized-storage/credentials)).
+  [Create 9EDBDF8F…](https://testnet.xrpl.org/transactions/9EDBDF8F26A630036C554D8D84FC4505F552E0134F7B81CA649299890AAF1F0C),
+  [Accept 45052933…](https://testnet.xrpl.org/transactions/45052933A3F433C64F79651F9DDD365B9321B3442114629DDB2C58139F0118F2).
+  Should-fail: the holder bot accepts a credential not issued to it →
+  [`tecNO_ENTRY`](https://testnet.xrpl.org/transactions/D16E059F6E595B7886783B643CFE859AAE33736B4C255423A299B1195806DF40).
+- **Batch.** One all-or-nothing Batch from the issuer, co-signed by the holder bot (a
+  `BatchSigner`): create + accept land together
+  ([D7750160…](https://testnet.xrpl.org/transactions/D775016051978F7CB34202C1BB4F4BBDA076BA7F4ED5D3D09CB49B5013F5DD51)).
+  Should-fail: the accept names a type that was never created, so the create is rolled back too.
+  The outer Batch is still `tesSUCCESS` (it pays the fee), so the game checks the ledger to
+  confirm nothing landed
+  ([86984A06…](https://testnet.xrpl.org/transactions/86984A06F95A6F651ED3C50EBB92167D7727704EAEA6848E4FBA1D8275EAA224)).
+
+Goals and should-fails score once per world; re-running a cleared part says so instead of
+sending transactions.
 
 ## Layout
 

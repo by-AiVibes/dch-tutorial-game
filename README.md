@@ -204,6 +204,7 @@ assets/fonts/       DejaVu Sans (bundled for the card; license in FONT-LICENSE.t
 public/             UI (vanilla JS/CSS/SVG): circuit level map, step cards, guided pointer
   mapstate.js       pure map logic (which switches are closed), shared with the tests
 test/               fast unit tests
+scripts/check-card-scroll.mjs  headless 375px check: card titles stay visible after each Next
 ```
 
 See [docs/INSTRUCTOR.md](docs/INSTRUCTOR.md) for running a session and [DEPLOY.md](DEPLOY.md) for hosting notes.

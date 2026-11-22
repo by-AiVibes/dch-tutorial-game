@@ -93,11 +93,12 @@ function render() {
   $("nav-tools").toggleAttribute("aria-current", r.name === "tools");
   if (r.name === "tools") $("nav-tools").setAttribute("aria-current", "page");
 
-  const screenKey = r.name + (r.id || "");
+  // Each card is its own screen: a new route or a new card always starts at the top.
+  const screenKey = r.name + (r.id || "") + (r.name === "level" ? ":" + (ui.step[r.id] ?? 0) : "");
   const out = r.name === "level" ? levelScreen(r.id) : r.name === "tools" ? toolsScreen() : r.name === "graduate" ? graduateScreen() : mapScreen();
   if (!out) return;
   $("screen").replaceChildren(...out.nodes.filter(Boolean));
-  if (screenKey !== lastScreen) { lastScreen = screenKey; window.scrollTo(0, 0); }
+  if (screenKey !== lastScreen) { lastScreen = screenKey; window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }
   requestAnimationFrame(() => pointer.set(out.target, out.hint));
 }
 
@@ -117,7 +118,14 @@ const pointer = {
       const typing = document.activeElement && document.activeElement.tagName === "INPUT";
       if (!typing) this.target.focus({ preventScroll: true });
       const r = this.target.getBoundingClientRect();
-      if (r.top < 70 || r.bottom > innerHeight - 10) this.target.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      // Only scroll when the target is below the fold, and never so far that the card title
+      // (or the top of the screen) leaves the view.
+      if (r.bottom > innerHeight - 10) {
+        const title = document.getElementById("cardtitle") || $("screen");
+        const maxY = title.getBoundingClientRect().top + scrollY - 64;
+        const y = Math.max(0, Math.min(r.bottom + scrollY - innerHeight + 16, maxY));
+        if (y > scrollY) window.scrollTo({ top: y, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+      }
       setTimeout(() => this.place(), 350);
     }
   },
@@ -542,5 +550,6 @@ function graduateScreen() {
 $("home").addEventListener("click", () => go("#/map"));
 $("nav-map").addEventListener("click", () => go("#/map"));
 $("nav-tools").addEventListener("click", () => go("#/tools"));
+if ("scrollRestoration" in history) history.scrollRestoration = "manual"; // the browser must not restore an old offset onto a new card
 addEventListener("hashchange", () => { render(); $("screen").focus({ preventScroll: true }); });
 refresh().catch((e) => { $("screen").replaceChildren(el("p", { class: "result bad" }, "Server not reachable: " + e.message)); });

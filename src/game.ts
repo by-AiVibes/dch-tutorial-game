@@ -90,14 +90,16 @@ export class Game {
         if (p.passed) changed = this.count(state, owner, { type: "quiz", id }, at) || changed;
       }
       if (state.award) { gradsInWorlds++; changed = this.count(state, owner, { type: "grad" }, Date.parse(state.award.date) || at) || changed; }
-      if (changed) this.persist(state);
+      if (changed) {
+        try { this.persist(state); } catch { this.log("stats: couldn't mark a world as counted during backfill"); }
+      }
     }
     const awards = awardCount();
     // Award cards of evicted worlds (their worlds are gone, the cards are not).
     const orphans = Math.max(0, awards - gradsInWorlds);
     if (orphans) s.addGraduates(orphans, this.now());
     s.data.backfill = { at: new Date(this.now()).toISOString(), worlds, awards };
-    s.flush();
+    s.flush(); // never throws; a failed save is retried on the next change
     return s.data.backfill;
   }
 

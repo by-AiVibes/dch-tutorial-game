@@ -2,7 +2,9 @@
 // visitor hashing (no IPs on disk), backfill, token-gated /api/stats, CLI.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as FS from "node:fs";
 import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+const require_fs = () => FS;
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -216,4 +218,61 @@ test("CLI: npm run dch -- stats reads the file", () => {
   assert.match(out, /Lifetime: visitors 1 .*worlds started 1.*avg first-try quiz points 20\/30/);
   assert.equal(JSON.parse(run("--json")).lifetime.worldsStarted, 1);
   assert.match(formatStats(s.snapshot(), ["wallet", "issue"]), /quizzes passed: {3}wallet 0, issue 0/);
+});
+
+test("save failures never throw: one short log line, counts kept in memory, retried", () => {
+  const blocker = join(DIR, "not-a-dir");
+  (require_fs()).writeFileSync(blocker, "x"); // a file where the data dir should be: mkdir fails, even as root
+  const lines: string[] = [];
+  const s = new Stats(join(blocker, "stats.json"), { network: "devnet", flushMs: 0, log: (m) => lines.push(m) });
+  s.visit("198.51.100.1", "Safari");
+  s.record({}, { type: "world" });
+  assert.equal(s.flush(), false);
+  assert.equal(s.data.lifetime.worldsStarted, 1);
+  assert.equal(lines.length, 1, "logged once, not on every change");
+  assert.doesNotMatch(lines[0], /not-a-dir|stats\.json|198\.51|\//, "no paths or values in the log");
+  require_fs().rmSync(blocker); // disk fixed: the next save writes everything kept in memory
+  s.record({}, { type: "grad" });
+  assert.equal(Stats.read(join(blocker, "stats.json"))?.lifetime.worldsStarted, 1);
+});
+
+test("a corrupt stats.json is moved aside, not overwritten; temp file name is fixed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "dch-stats-corrupt-"));
+  const path = join(dir, "stats.json");
+  require_fs().writeFileSync(path, "{not json");
+  const lines: string[] = [];
+  const s = new Stats(path, { network: "devnet", flushMs: 0, log: (m) => lines.push(m), now: () => Date.parse("2026-11-22T20:00:00Z") });
+  const aside = readdirSync(dir).filter((f) => f.startsWith("stats.json.corrupt-2026-11-22"));
+  assert.equal(aside.length, 1);
+  assert.equal(readFileSync(join(dir, aside[0]), "utf8"), "{not json");
+  assert.equal(lines.length, 1);
+  s.record({}, { type: "world" });
+  assert.deepEqual(readdirSync(dir).sort(), ["stats.json", aside[0]].sort(), "no leftover temp; only stats.json(.tmp) names are used");
+  assert.match(readFileSync(new URL("../src/stats.ts", import.meta.url), "utf8"), /`\$\{this\.path\}\.tmp`/);
+});
+
+test("an unwritable data dir doesn't kill the server: it starts, serves, and stays up", async () => {
+  const blocker = join(DIR, "data-is-a-file");
+  require_fs().writeFileSync(blocker, "x");
+  const { spawn } = await import("node:child_process");
+  const port = 20000 + Math.floor(Math.random() * 20000);
+  const child = spawn(process.execPath, ["src/server.ts"], { env: { ...process.env, DCH_DATA_DIR: blocker, PORT: String(port), HOST: "127.0.0.1", XRPL_NETWORK: "devnet", DCH_STATS_TOKEN: "" }, stdio: ["ignore", "pipe", "pipe"] });
+  let out = "";
+  child.stdout.on("data", (d) => (out += d));
+  child.stderr.on("data", (d) => (out += d));
+  try {
+    const t0 = Date.now();
+    while (!/DCH tutorial game on/.test(out)) {
+      if (child.exitCode !== null) assert.fail(`server exited: ${out}`);
+      if (Date.now() - t0 > 15_000) assert.fail(`server didn't start: ${out}`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    for (let i = 0; i < 3; i++) assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status, 200); // page views try to save
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(child.exitCode, null, "still running");
+    assert.match(out, /stats: couldn't save the counts/, "the startup backfill save failed and was only logged");
+    assert.doesNotMatch(out, /data-is-a-file/, "no paths logged");
+  } finally {
+    child.kill("SIGKILL");
+  }
 });

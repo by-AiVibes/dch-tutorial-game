@@ -207,10 +207,15 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const game = new Game(loadConfig(), (m) => console.log(m));
-  game.stats = openStats(game.cfg.name);
-  if (process.env.DCH_STATS_BACKFILL !== "0") {
-    const bf = game.backfillStats();
-    if (bf) console.log(`stats: backfilled ${bf.worlds} worlds and ${bf.awards} awards`);
+  // Stats never stop the game: a bad file or an unwritable disk only logs a line.
+  try {
+    game.stats = openStats(game.cfg.name);
+    if (process.env.DCH_STATS_BACKFILL !== "0") {
+      const bf = game.backfillStats();
+      if (bf) console.log(`stats: backfilled ${bf.worlds} worlds and ${bf.awards} awards`);
+    }
+  } catch {
+    console.error("stats: backfill failed; counting goes on without it");
   }
   const server = createServer(createHandler(game));
   // Save the counters on a normal stop (systemd sends SIGTERM); writes are atomic anyway.

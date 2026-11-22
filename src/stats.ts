@@ -14,7 +14,7 @@
  * containing a DCH_STATS_IGNORE_UA marker such as the e2e's "DCH-e2e") are never counted.
  */
 import { createHmac, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export interface DayStats {
@@ -97,6 +97,8 @@ export interface StatsOptions {
   ignoreUa?: string;
   /** Write at most this often (ms); 0 writes on every change (tests). */
   flushMs?: number;
+  /** One short line on a failed save or a quarantined file (never paths or values). */
+  log?: (msg: string) => void;
 }
 
 export class Stats {
@@ -107,6 +109,8 @@ export class Stats {
   private readonly uaMarks: string[];
   private readonly flushMs: number;
   private timer: NodeJS.Timeout | null = null;
+  private readonly log: (msg: string) => void;
+  private failing = false;
   // Today's visitor key and hashes: memory only, replaced every UTC day.
   private visitorDay = "";
   private visitorKey: Buffer = randomBytes(32);
@@ -118,9 +122,27 @@ export class Stats {
     this.ipIgnored = parseIgnoreIps(opts.ignoreIps);
     this.uaMarks = (opts.ignoreUa ?? "DCH-e2e").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
     this.flushMs = opts.flushMs ?? 5000;
-    this.data = Stats.read(path) ?? { version: 1, network: opts.network, createdAt: new Date(this.now()).toISOString(), backfill: null, lifetime: emptyDay(), days: {} };
+    this.log = opts.log ?? ((m) => console.error(m));
+    this.data = this.loadOrQuarantine() ?? { version: 1, network: opts.network, createdAt: new Date(this.now()).toISOString(), backfill: null, lifetime: emptyDay(), days: {} };
   }
 
+  /**
+   * Load the file; if it exists but can't be parsed, move it aside to
+   * stats.json.corrupt-<UTC date-time> (kept for a look) and start empty, never overwrite it.
+   */
+  private loadOrQuarantine(): StatsFile | null {
+    const ok = Stats.read(this.path);
+    if (ok || !existsSync(this.path)) return ok;
+    try {
+      renameSync(this.path, `${this.path}.corrupt-${new Date(this.now()).toISOString().replace(/[:.]/g, "-")}`);
+      this.log("stats: the stats file was unreadable; moved it aside and started fresh");
+    } catch {
+      this.log("stats: the stats file was unreadable and couldn't be moved aside");
+    }
+    return null;
+  }
+
+  /** Parse the file (read-only; null when missing or unreadable). */
   static read(path: string): StatsFile | null {
     try {
       const j = JSON.parse(readFileSync(path, "utf8")) as StatsFile;
@@ -207,13 +229,25 @@ export class Stats {
     this.timer.unref?.();
   }
 
-  /** Atomic write: temp file in the same directory, then rename. */
-  flush() {
+  /**
+   * Atomic write: a fixed temp file in the same directory, then rename. Never throws: a failed
+   * save logs one short line (once until a save works again) and the counts stay in memory for
+   * the next try, so a full or read-only disk can't break the game.
+   */
+  flush(): boolean {
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
-    mkdirSync(dirname(this.path), { recursive: true });
-    const tmp = `${this.path}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(this.data, null, 1), { mode: 0o600 });
-    renameSync(tmp, this.path);
+    try {
+      mkdirSync(dirname(this.path), { recursive: true });
+      const tmp = `${this.path}.tmp`;
+      writeFileSync(tmp, JSON.stringify(this.data, null, 1), { mode: 0o600 });
+      renameSync(tmp, this.path);
+      this.failing = false;
+      return true;
+    } catch {
+      if (!this.failing) this.log("stats: couldn't save the counts; will retry on the next change");
+      this.failing = true;
+      return false;
+    }
   }
 }
 

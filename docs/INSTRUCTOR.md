@@ -13,6 +13,10 @@ A 45–60 minute session for developers who know basic XRPL concepts (accounts, 
 
 ## Running it
 
+- Start with **Level 0** on the dashboard: everyone creates a devnet wallet in their own browser,
+  funds it from the faucet, checks the balance, and claims a seat with it. Stress the warning:
+  save the seed, it's test-only, never reuse a test seed on mainnet.
+
 - Each player types a name and claims a seat. Unclaimed seats are bots; if a level's seats are
   all bots, anyone can press the buttons (good for a demo from the front).
 - For each level: read the goal aloud, run it, open one transaction in the explorer, then ask

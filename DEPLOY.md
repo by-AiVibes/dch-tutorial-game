@@ -14,6 +14,9 @@ Plan, for later:
 - Outbound access needed: the test network WebSocket (default port 51233, or a 443 endpoint via
   `XRPL_WS`) and the faucet over HTTPS.
 - Health check: `GET /api/state` returns 200.
+- Level 0: browsers call the public faucet directly and load `/vendor/xrpl.js` (served from
+  `node_modules/xrpl/build`, so keep production installs complete). `/api/account/<address>`
+  does a ledger lookup per call and needs the same rate limit as the other endpoints.
 - Before public hosting, add a rate limit and a queue cap: `/api/objects` and the
   `/api/levels/...` endpoints each trigger ledger requests (and level runs submit transactions);
   today all operations share one in-process queue with no cap.

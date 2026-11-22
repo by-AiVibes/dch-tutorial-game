@@ -7,6 +7,8 @@ export interface Seat {
   role: Role;
   /** null means a bot plays this seat. */
   player: string | null;
+  /** Optional: the player's own test-network address from Level 0 (public; never a seed). */
+  wallet?: string | null;
 }
 
 export type Seats = Record<Role, Seat>;
@@ -28,15 +30,16 @@ export function cleanPlayer(name: unknown): string {
 }
 
 /** Claim a seat. One seat per player; a seat held by someone else can't be taken. */
-export function claimSeat(seats: Seats, role: Role, player: string): Seats {
+export function claimSeat(seats: Seats, role: Role, player: string, wallet: string | null = null): Seats {
   const p = cleanPlayer(player);
   const current = seats[role];
   if (current.player && current.player !== p) {
     throw new Error(`The ${role} seat is already claimed.`);
   }
   const next = structuredClone(seats);
-  for (const r of ROLES) if (next[r].player === p) next[r].player = null; // move, don't hold two
+  for (const r of ROLES) if (next[r].player === p) Object.assign(next[r], { player: null, wallet: null }); // move, don't hold two
   next[role].player = p;
+  next[role].wallet = wallet ?? seats[role].wallet ?? null;
   return next;
 }
 
@@ -46,6 +49,7 @@ export function releaseSeat(seats: Seats, role: Role, player: string): Seats {
   if (seats[role].player !== p) throw new Error(`You don't hold the ${role} seat.`);
   const next = structuredClone(seats);
   next[role].player = null;
+  next[role].wallet = null;
   return next;
 }
 

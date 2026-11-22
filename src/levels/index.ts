@@ -14,6 +14,27 @@ const planned = (d: Omit<LevelDef, "runGoal" | "runShouldFail">): LevelDef => d;
 const live = (d: Omit<LevelDef, "runGoal" | "runShouldFail">, r: Pick<LevelDef, "runGoal" | "runShouldFail">): LevelDef => ({ ...d, ...r });
 
 export const LEVELS: LevelDef[] = [
+  planned({
+    id: "wallet", n: 0, title: "Get your devnet wallet", feature: null,
+    goal: "Learn what devnet is, create your own test wallet in this browser, fund it from the public faucet, check its balance live, and claim a seat with it.",
+    shouldFail: "(Unscored onboarding level.)",
+    rejectReason: "",
+    expectedRejects: [],
+    goalRoles: [], shouldFailRoles: [],
+    bots: "Bots keep every seat until you claim one.",
+    docs: [
+      { title: "Parallel networks (mainnet, testnet, devnet)", href: "https://xrpl.org/docs/concepts/networks-and-servers/parallel-networks" },
+      { title: "XRP faucets", href: "https://xrpl.org/resources/dev-tools/xrp-faucets" },
+      { title: "Accounts", href: "https://xrpl.org/docs/concepts/accounts" },
+      { title: "Reserves", href: "https://xrpl.org/docs/concepts/accounts/reserves" },
+      { title: "Cryptographic keys", href: "https://xrpl.org/docs/concepts/accounts/cryptographic-keys" },
+    ],
+    explainer: [
+      "Devnet is a public XRP Ledger test network for developers. Its XRP is free from a faucet and has no value, and the network can be reset at any time, wiping accounts.",
+      "An account is created by sending it enough XRP to meet the base reserve; the faucet does that for you.",
+      "Your wallet's seed is its secret key. This game makes it in your browser and never sends it to the server: only your address (r…) is shared.",
+    ],
+  }),
   level1,
   live({
     id: "freeze", n: 2, title: "Freeze and clawback", feature: "Clawback",
@@ -112,8 +133,8 @@ export const LEVELS: LevelDef[] = [
   }),
 ];
 
-/** Scored levels are the seven from the design page; the explainer is unscored. */
-export const SCORED_LEVELS = LEVELS.filter((l) => l.n <= 7);
+/** Scored levels are the seven from the design page; Level 0 (onboarding) and the explainer are unscored. */
+export const SCORED_LEVELS = LEVELS.filter((l) => l.n >= 1 && l.n <= 7);
 
 export function findLevel(id: string): LevelDef | undefined {
   return LEVELS.find((l) => l.id === id);

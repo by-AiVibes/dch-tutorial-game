@@ -177,7 +177,8 @@ export class Game {
       questions: qs,
       answers: (p?.answers ?? []).map((a, i) => ({ choice: a.choice, correct: a.correct, ...(a.correct ? {} : { why: QUIZZES[levelId][i].why }) })),
       passed: !!p?.passed,
-      points: p?.passed ? p.points : 0,
+      points: p?.points ?? 0,
+      firstDone: !!p && (p.attempts > 1 || p.answers.length >= qs.length),
       maxPoints: qs.length * QUIZ_POINTS,
       pass: QUIZ_PASS,
       attempts: p?.attempts ?? 0,
@@ -197,7 +198,8 @@ export class Game {
   /**
    * Answer the next question of a level's quiz. Checked here, never in the browser. Questions
    * are answered in order; after the last one the attempt passes with QUIZ_PASS correct
-   * (points = correct x QUIZ_POINTS, locked in) or fails and can be retried.
+   * or fails and can be retried. Points come from the FIRST attempt only (correct x QUIZ_POINTS);
+   * later attempts only unlock advancement.
    */
   answerQuiz(levelId: unknown, q: unknown, choice: unknown, rawKey: unknown) {
     const key = Game.key(rawKey);
@@ -222,7 +224,8 @@ export class Game {
       const right = p.answers.filter((a) => a.correct).length;
       if (p.answers.length === qs.length) {
         done = true;
-        if (right >= QUIZ_PASS) { p.passed = true; p.points = right * QUIZ_POINTS; }
+        if (p.attempts === 1) p.points = right * QUIZ_POINTS;
+        if (right >= QUIZ_PASS) p.passed = true;
       }
       this.touch(key);
       this.persist(state);
@@ -230,7 +233,7 @@ export class Game {
     });
   }
 
-  /** Start a fresh attempt after a failed one (no lockout, no penalty beyond the points). */
+  /** Start a fresh attempt after a failed one: no lockout; it can pass the quiz but adds no points. */
   retryQuiz(levelId: unknown, rawKey: unknown) {
     const key = Game.key(rawKey);
     const id = typeof levelId === "string" && Object.hasOwn(QUIZZES, levelId) ? levelId : null;

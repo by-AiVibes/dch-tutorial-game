@@ -23,8 +23,8 @@ export const DEFAULT_RULES: Record<LimitClass, LimitRule> = {
   // cap and the stored-world cap live in the Game (DCH_MAX_NEW_WORLDS_PER_HOUR, DCH_MAX_WORLDS).
   world: { max: 3, windowMs: 3_600_000 },
   award: { max: 10, windowMs: 3_600_000 }, // POST /api/award: create or rename your card
-  awardview: { max: 60, windowMs: 60_000, globalMax: 600 },
-  quiz: { max: 30, windowMs: 60_000 }, // POST /api/quiz/answer and /retry // /award/<id> page + PNG (link previews fetch these)
+  awardview: { max: 60, windowMs: 60_000, globalMax: 600 }, // /award/<id> page + PNG (link previews fetch these)
+  quiz: { max: 30, windowMs: 60_000 }, // POST /api/quiz/answer and /api/quiz/retry
 };
 
 export function rulesFromEnv(env: NodeJS.ProcessEnv = process.env): Record<LimitClass, LimitRule> {

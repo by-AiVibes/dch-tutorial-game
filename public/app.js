@@ -252,8 +252,11 @@ function levelScreen(id) {
   const isLast = idx === cards.length - 1;
   const setIdx = (i) => { ui.step[id] = i; saveUi(); render(); };
   const back = el("button", { class: "big", "data-pt": "back", on: { click: () => (idx > 0 ? setIdx(idx - 1) : go("#/map")) } }, idx > 0 ? "← Back" : "← Map");
-  const nextFn = c.next || (() => (isLast ? go("#/map") : setIdx(idx + 1)));
-  const next = el("button", { class: "primary big", "data-pt": `next-${idx}`, ...(busy || c.nextDisabled ? { disabled: true } : {}), on: { click: nextFn } }, c.nextLabel || (isLast ? "Map" : "Next →"));
+  const nextFn = c.nextDisabled
+    // Not answered yet: Next stays on this card, back at its top, and says what to do.
+    ? () => { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); $("hint").textContent = c.hint || ""; }
+    : c.next || (() => (isLast ? go("#/map") : setIdx(idx + 1)));
+  const next = el("button", { class: "primary big" + (c.nextDisabled ? " is-off" : ""), "data-pt": `next-${idx}`, ...(busy ? { disabled: true } : {}), ...(c.nextDisabled ? { "aria-disabled": "true" } : {}), on: { click: nextFn } }, c.nextLabel || (isLast ? "Map" : "Next →"));
   keys.back = () => back.click();
   keys.next = () => { if (!next.disabled) next.click(); };
   const more = c.more === false ? null : el("details", { class: "more" }, el("summary", {}, "Learn more"),
@@ -309,7 +312,7 @@ function cardsFor(l) {
     const parts = (l.explainer || []).map((t, i) => ({ title: i === 0 ? l.title.replace(/^Explainer:\s*/i, "") : `Part ${i + 1}`, body: [el("p", { class: "lead" }, t)], more: i === 0 ? undefined : false, diag: `${l.id}:p${i}` }));
     if (l.quiz) {
       const qz = quizCards(l, parts.length);
-      return [...parts, ...qz.cards, qz.finish(finishCard(l, "Switch closed ✓", `Quiz passed: ${l.quiz.points} of ${l.quiz.maxPoints} points. Score ${state.score}/${state.maxScore}.`))];
+      return [...parts, ...qz.cards, qz.finish(finishCard(l, "Switch closed ✓", `Quiz passed: ${l.quiz.points} of ${l.quiz.maxPoints} first-try points. Score ${state.score}/${state.maxScore}.`))];
     }
     const done = finishCard(l, "Explainer read ✓", "That switch is closed. Back to your circuit.");
     const nextFn = done.next;
@@ -354,7 +357,9 @@ function quizCards(l, firstIdx) {
         a ? el("p", { class: "result " + (a.correct ? "ok" : "bad"), role: "status" }, a.correct ? "Correct ✓" : `Not quite. Here's why: ${a.why}`) : null,
         blocked ? el("p", { class: "note" }, `Answer question ${qz.answers.length + 1} first.`) : null,
         quizMsg[l.id] ? el("p", { class: "result bad", role: "alert" }, quizMsg[l.id]) : null,
-        el("p", { class: "note" }, qz.passed ? `Quiz passed: ${qz.points}/${qz.maxPoints}.` : `Pass with ${qz.pass} of ${n}. ${QUIZ_PTS} points per right answer.`),
+        el("p", { class: "note" }, qz.passed ? `Quiz passed. First-try score: ${qz.points}/${qz.maxPoints}.`
+          : qz.firstDone ? `Retry: pass with ${qz.pass} of ${n} to close the switch. Retries add no points (first try: ${qz.points}/${qz.maxPoints}).`
+          : `Pass with ${qz.pass} of ${n}. ${QUIZ_PTS} points per right answer on your first try.`),
       ],
       nextDisabled: !a && !qz.passed && !over,
       hint: "Pick an answer.",
@@ -367,6 +372,7 @@ function quizCards(l, firstIdx) {
     return {
       title: `Quiz: ${right} of ${n} right`, more: false,
       body: [el("p", { class: "lead" }, `You need ${qz.pass} of ${n} to close this switch. Read the why lines and try again.`),
+        el("p", { class: "note" }, `Your first-try quiz points (${qz.points}/${qz.maxPoints}) are kept. A retry only closes the switch; it adds no points.`),
         el("div", { class: "act" }, btn = el("button", { class: "primary big", "data-pt": "quiz-retry", ...(busy ? { disabled: true } : {}), on: { click: retry } }, "Try again")),
         quizMsg[l.id] ? el("p", { class: "result bad", role: "alert" }, quizMsg[l.id]) : null],
       target: () => (busy ? null : btn), hint: "Press Try again.",
@@ -449,7 +455,7 @@ function scoredCards(l) {
   const done = l.score.goal && l.score.shouldFail;
   if (!done) { cards.push(finishCard(l, "Almost there", `You have ${pts} of 20 points. Finish both steps, then a 3-question quiz closes this switch.`)); return cards; }
   const qz = quizCards(l, cards.length);
-  cards.push(...qz.cards, qz.finish(finishCard(l, "Switch closed ✓", `Level ${l.n} complete: ${pts} of 20 level points + ${l.quiz?.points ?? 0} of ${l.quiz?.maxPoints ?? 0} quiz points. Score ${state.score}/${state.maxScore}.`)));
+  cards.push(...qz.cards, qz.finish(finishCard(l, "Switch closed ✓", `Level ${l.n} complete: ${pts} of 20 level points + ${l.quiz?.points ?? 0} of ${l.quiz?.maxPoints ?? 0} quiz points (first try). Score ${state.score}/${state.maxScore}.`)));
   return cards;
 }
 
@@ -531,7 +537,7 @@ function walletCards(l) {
       target: () => (address && !busy ? worldBtn : null),
       hint: "Press Start my world.",
     },
-    ...(walletDone() && l.quiz ? (() => { const qz = quizCards(l, 5); return [...qz.cards, qz.finish(finishCard(l, "Wallet ready ✓", `Switch closed. Quiz: ${l.quiz.points} of ${l.quiz.maxPoints} points. Level 1 is next.`))]; })()
+    ...(walletDone() && l.quiz ? (() => { const qz = quizCards(l, 5); return [...qz.cards, qz.finish(finishCard(l, "Wallet ready ✓", `Switch closed. Quiz: ${l.quiz.points} of ${l.quiz.maxPoints} first-try points. Level 1 is next.`))]; })()
       : [finishCard(l, "Wallet step", "Build your world and claim a seat with your wallet. Then a 3-question quiz closes this switch.")]),
   ];
 }

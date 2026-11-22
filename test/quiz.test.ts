@@ -64,19 +64,27 @@ test("2 of 3 correct passes; points = correct answers x 10, locked in", async ()
   await assert.rejects(g.retryQuiz("issue", a), /already passed/);
 });
 
-test("1 of 3 fails; the attempt is over until Try again; a retry starts fresh and only the passing attempt scores", async () => {
+test("1 of 3 fails; the attempt is over until Try again; a retry starts fresh, can pass, but adds no points", async () => {
   const { g, any } = fakeGame();
   const a = await player(g, any);
   const r = await quiz(g, a, "vault", [false, true, false]);
   assert.deepEqual([r.done, r.passed, r.right], [true, false, 1]);
-  assert.equal(lvl(r.view, "vault").quiz.points, 0);
+  assert.equal(lvl(r.view, "vault").quiz.points, 10, "first try: 1 right = 10 points, kept");
+  assert.equal(r.view.quizScore, 10);
   await assert.rejects(g.answerQuiz("vault", 0, right("vault", 0), a), /press Try again/);
   const v = await g.retryQuiz("vault", a);
   assert.deepEqual(lvl(v, "vault").quiz.answers, []);
   assert.equal(lvl(v, "vault").quiz.attempts, 2);
   const r2 = await quiz(g, a, "vault", [true, true, true]);
-  assert.equal(r2.passed, true);
-  assert.equal(lvl(r2.view, "vault").quiz.points, 30);
+  assert.equal(r2.passed, true, "a retry unlocks advancement");
+  assert.equal(lvl(r2.view, "vault").quiz.points, 10, "retries can't raise the score by reading the why lines");
+  // 0 of 3 first, then a perfect retry: passed with 0 points
+  const r3 = await quiz(g, a, "lend", [false, false, false]);
+  assert.equal(r3.passed, false);
+  await g.retryQuiz("lend", a);
+  const r4 = await quiz(g, a, "lend", [true, true, true]);
+  assert.equal(r4.passed, true);
+  assert.equal(lvl(r4.view, "lend").quiz.points, 0);
 });
 
 test("inputs validated: unknown quiz, bad question/choice, out of order, locked until the level is done", async () => {
@@ -112,7 +120,7 @@ test("answers and why lines never reach the browser before a wrong answer", asyn
   }
 });
 
-test("score math: perfect run = 140 level + 270 quiz = 410; each miss in the passing attempt costs 10", async () => {
+test("score math: perfect run = 140 level + 270 quiz = 410; each first-try miss costs 10", async () => {
   const { g, any } = fakeGame();
   assert.equal(QUIZ_MAX, 270);
   const a = await player(g, any);
@@ -138,10 +146,10 @@ test("award requires every quiz; Level 8 counts through its quiz, so the card sh
   const rec = AW.loadAward(card.id)!;
   assert.equal(rec.levels.length, 9);
   assert.equal(rec.levels[8].short, "Confidential");
-  assert.equal(rec.score, 400);
+  assert.equal(rec.score, 380, "Level 8 first try was 0 of 3: no quiz points there, though the retry passed");
   assert.equal(rec.maxScore, 410);
   const svg = AW.awardSvg(rec);
-  assert.ok(svg.includes("9/9") && svg.includes("SCORE 400/410"));
+  assert.ok(svg.includes("9/9") && svg.includes("SCORE 380/410"));
   // map state agrees: all 9 switches closed only once every quiz is passed
   const ms = M.mapState(g.view(a).levels, { walletDone: true, read: [] });
   assert.equal(ms.allComplete, true);
@@ -193,4 +201,14 @@ test("server: quiz routes, validation, shared world closed, own rate-limit class
   }
   assert.equal(classify("POST", "/api/quiz/answer"), "quiz");
   assert.equal(classify("POST", "/api/quiz/retry"), "quiz");
+});
+
+test("quiz content: batch Q3 matches xrpl.org (each account signs the whole batch); freeze Q3 wording", () => {
+  const b = QUIZZES.batch[2];
+  assert.equal(b.choices[b.answer], "It co-signs the whole batch, because one inner transaction is its own");
+  assert.equal(b.why, "In a multi-account batch, every account whose transaction is inside signs the whole batch (all inner transactions), not just its own part.");
+  assert.ok(b.choices.filter((c, i) => i !== b.answer).every((c) => !/sign/i.test(c) || /doesn't sign/i.test(c)), "no distractor is also correct");
+  const f = QUIZZES.freeze[2];
+  assert.equal(f.choices[f.answer], "Stops the frozen tokens from moving, except straight back to the issuer");
+  for (const qs of Object.values(QUIZZES)) for (const q of qs) assert.equal(new Set(q.choices).size, q.choices.length);
 });

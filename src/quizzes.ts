@@ -11,7 +11,7 @@ export interface QuizQuestion {
   why: string;
 }
 
-/** Points per correct quiz answer, counted from the attempt that passed. */
+/** Points per correct answer on the FIRST attempt only; later attempts unlock advancement but add no points. */
 export const QUIZ_POINTS = 10;
 /** Correct answers needed to pass a quiz. */
 export const QUIZ_PASS = 2;
@@ -38,8 +38,8 @@ export const QUIZZES: Record<string, QuizQuestion[]> = {
       why: "Clawback is refused unless the issuer enabled it, and only the issuer can submit it." },
     { q: "The Level 1 issuer never enabled clawback. Can it claw back TST?", choices: ["Yes", "No, it's refused", "Only from frozen lines"], answer: 1,
       why: "Clawback is refused unless the issuer enabled it first." },
-    { q: "Freezing a trust line does what?", choices: ["Deletes the tokens", "Stops the frozen tokens from moving", "Sends them back to the issuer"], answer: 1,
-      why: "A freeze stops the tokens on that line from moving; it doesn't delete or return them (clawback does that)." },
+    { q: "Freezing a trust line does what?", choices: ["Deletes the tokens", "Stops the frozen tokens from moving, except straight back to the issuer", "Sends them back to the issuer"], answer: 1,
+      why: "A freeze stops the tokens on that line from moving, except straight back to the issuer; it doesn't delete them (clawback takes them back)." },
   ],
   creds: [
     { q: "Who can accept a credential?", choices: ["Anyone", "The issuer", "Only the credential's subject"], answer: 2,
@@ -62,8 +62,8 @@ export const QUIZZES: Record<string, QuizQuestion[]> = {
       why: "In all-or-nothing mode, if one inner transaction fails, none apply." },
     { q: "Can the outer Batch still show tesSUCCESS when the inner ones didn't apply?", choices: ["No, never", "Yes, it still pays the fee", "Only on mainnet"], answer: 1,
       why: "The outer Batch can still be tesSUCCESS (it pays the fee), so the game checks that the create did not land." },
-    { q: "Why does the holder bot sign?", choices: ["It pays the fee", "It's co-signing its half of the batch", "It doesn't sign"], answer: 1,
-      why: "The counterparty bot signs its half of the batch: the accept is co-signed." },
+    { q: "Why does the holder bot sign?", choices: ["It pays the batch fee for everyone", "It co-signs the whole batch, because one inner transaction is its own", "It doesn't sign; only the issuer does"], answer: 1,
+      why: "In a multi-account batch, every account whose transaction is inside signs the whole batch (all inner transactions), not just its own part." },
   ],
   vault: [
     { q: "What do you get when you deposit into a vault?", choices: ["A loan", "Shares", "A credential"], answer: 1,
@@ -105,7 +105,7 @@ export interface QuizProgress {
   /** Answers in the current attempt, in order. */
   answers: { choice: number; correct: boolean }[];
   passed: boolean;
-  /** Points from the attempt that passed (correct answers x QUIZ_POINTS). */
+  /** First-attempt points (correct answers on attempt 1 x QUIZ_POINTS), set when attempt 1 ends. */
   points: number;
   attempts: number;
 }
@@ -113,5 +113,5 @@ export interface QuizProgress {
 export const emptyProgress = (): QuizProgress => ({ answers: [], passed: false, points: 0, attempts: 1 });
 
 export function quizPoints(quizzes: Record<string, QuizProgress> | undefined): number {
-  return Object.values(quizzes ?? {}).reduce((n, p) => n + (p.passed ? p.points : 0), 0);
+  return Object.values(quizzes ?? {}).reduce((n, p) => n + (p.points || 0), 0);
 }

@@ -71,6 +71,11 @@ Plan, for later:
     (quizzes are checked on the server, so Level 8 counts).
 - Quizzes: `POST /api/quiz/answer {world, level, q, choice}` and `POST /api/quiz/retry {world, level}`.
   Answers never leave the server. Rate limit class `quiz`: 30/min per IP (`DCH_RL_QUIZ_MAX`).
+  - Classrooms behind one NAT share one IP: 30 players answering at once can hit it. Raise it for
+    the session, e.g. `DCH_RL_QUIZ_MAX=300` (and `DCH_RL_<CLASS>_MAX` for other classes), then
+    set it back.
+  - Scoring: 10 points per right answer on the FIRST attempt only. A retry (after fewer than 2
+    of 3) can pass the quiz and close the switch, but adds no points.
   - `DCH_MAX_AWARDS` (default 2000) → 503 when full. Rate limits: `award` class 10/hour per IP
     (`DCH_RL_AWARD_MAX`), `awardview` 60/min per IP and 600/min server-wide.
   - CSP stays self-only: the card is a same-origin PNG; the share page has no scripts or inline

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DCH Tutorial Game — XRPL test networks</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>DCH Tutorial Game</h1>
+  <p class="sub">Learn the XRP Ledger by doing — on a test network, with no real funds.</p>
+  <div id="stats" class="stats"></div>
+</header>
+<main>
+  <section>
+    <h2>Seats</h2>
+    <p>Claim a role. Bots play every seat you leave open.</p>
+    <label>Your name <input id="player" maxlength="32" placeholder="e.g. ada"></label>
+    <div id="seats" class="seats"></div>
+  </section>
+  <section>
+    <h2>Levels</h2>
+    <div id="levels" class="levels"></div>
+  </section>
+  <section id="detail"></section>
+  <section>
+    <h2>Network check</h2>
+    <p>Levels unlock only when their amendment is enabled on this network (checked live with the <code>feature</code> method).
+      <button id="check">Re-check amendments</button></p>
+    <div id="amend"></div>
+  </section>
+  <section>
+    <h2>Recent ledger results</h2>
+    <div id="recent"></div>
+    <div id="bugs"></div>
+  </section>
+  <section>
+    <h2>World</h2>
+    <p>Start over with fresh faucet accounts: run <code>npm run dch -- reset-world</code>.</p>
+    <button id="reset" title="Needs DCH_ALLOW_HTTP_RESET=1 on the server">Reset world</button>
+  </section>
+</main>
+<footer>Test networks only. Facts link to <a href="https://xrpl.org/docs">xrpl.org</a>.</footer>
+<script src="/app.js"></script>
+</body>
+</html>

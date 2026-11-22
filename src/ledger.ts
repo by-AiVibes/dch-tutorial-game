@@ -1,0 +1,54 @@
+// Thin xrpl.js wrapper: connect with mainnet guards, fund from faucet, submit and report.
+
+import { Client, Wallet, type SubmittableTransaction } from "xrpl";
+import { assertTestNetworkId, type NetworkConfig } from "./config.ts";
+
+export interface TxResult {
+  hash: string;
+  engineResult: string;
+  validated: boolean;
+  type: string;
+  account: string;
+  at: string;
+}
+
+export async function connect(cfg: NetworkConfig): Promise<Client> {
+  const client = new Client(cfg.ws, { connectionTimeout: 15000 });
+  await client.connect();
+  const info = await client.request({ command: "server_info" });
+  assertTestNetworkId(info.result.info.network_id, cfg.networkId);
+  return client;
+}
+
+/** Fund a brand-new wallet from the public faucet. Seed stays in memory/state file; never logged. */
+export async function fundNew(client: Client, cfg: NetworkConfig): Promise<Wallet> {
+  const { wallet } = await client.fundWallet(null, { faucetHost: cfg.faucetHost });
+  return wallet;
+}
+
+/**
+ * Autofill, sign, submit and wait. Never throws on a tec/tem result: a should-fail
+ * attempt *wants* a rejection, so the caller judges the engine result.
+ */
+export async function submit(client: Client, wallet: Wallet, tx: SubmittableTransaction): Promise<TxResult> {
+  const prepared = await client.autofill({ ...tx, Account: wallet.address } as SubmittableTransaction);
+  const signed = wallet.sign(prepared);
+  const at = new Date().toISOString();
+  try {
+    const res = await client.submitAndWait(signed.tx_blob);
+    const meta = res.result.meta as { TransactionResult?: string } | undefined;
+    return {
+      hash: res.result.hash,
+      engineResult: meta?.TransactionResult ?? "unknown",
+      validated: res.result.validated === true,
+      type: tx.TransactionType,
+      account: wallet.address,
+      at,
+    };
+  } catch (err) {
+    // tem/tef/tel results are rejected before a ledger includes them; xrpl.js throws for those.
+    const msg = err instanceof Error ? err.message : String(err);
+    const code = /\b(te[cfmlr][A-Z_]+)\b/.exec(msg)?.[1] ?? "submitError";
+    return { hash: signed.hash, engineResult: code, validated: false, type: tx.TransactionType, account: wallet.address, at };
+  }
+}

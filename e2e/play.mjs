@@ -83,7 +83,7 @@ if (FRESH) saved = null;
 const browser = await chromium.launch({ headless: !HEADED });
 const ctx = await browser.newContext({
   viewport: { width: 375, height: 667 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
-  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1",
+  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1 DCH-e2e", // DCH-e2e: excluded from visitor/player stats
 });
 const page = await ctx.newPage();
 if (LATENCY > 0) await page.route(`${BASE}/api/**`, async (r) => { await sleep(LATENCY); await r.continue(); });

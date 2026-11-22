@@ -13,7 +13,7 @@ const VH = Number(process.env.VH || 667);
 const MAX_STEPS = Number(process.env.MAX_STEPS || 500);
 const { QUIZZES } = await import(new URL("../src/quizzes.ts", import.meta.url).href);
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
-const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1";
+const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1 DCH-e2e";
 const port = 9400 + Math.floor(Math.random() * 400);
 const prof = process.env.PROFILE || `/tmp/chr-profile-play-${process.pid}`; // PROFILE=dir resumes a player
 const chrome = spawn("google-chrome", ["--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", `--remote-debugging-port=${port}`, `--user-data-dir=${prof}`, "about:blank"], { stdio: "ignore" });

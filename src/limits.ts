@@ -45,7 +45,7 @@ export function classify(_method: string, path: string): LimitClass {
   if (path === "/api/award") return "award";
   if (path.startsWith("/api/quiz/")) return "quiz";
   if (path.startsWith("/award/")) return "awardview";
-  if (path.startsWith("/api/account/")) return "account";
+  if (path.startsWith("/api/account/") || path === "/api/stats") return "account"; // stats: slows token guessing
   if (path === "/api/objects" || path === "/api/amendments" || path.startsWith("/api/levels/")) return "heavy";
   return "read";
 }

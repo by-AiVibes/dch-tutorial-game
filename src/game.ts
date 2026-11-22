@@ -8,6 +8,7 @@ import { findLevel, LEVELS, SCORED_LEVELS } from "./levels/index.ts";
 import type { AccountKey, LevelContext } from "./levels/types.ts";
 import { award, judgeShouldFail, MAX_SCORE, total, type Part } from "./scoring.ts";
 import { botSeats, canAct, claimSeat, isRole, releaseSeat, ROLES } from "./seats.ts";
+import { QueueGate } from "./limits.ts";
 import { load, publicView, save, type RecentResult, type WorldState } from "./store.ts";
 
 /** Accounts funded per world: the five role seats plus one holder bot. */
@@ -18,6 +19,7 @@ export class Game {
   private state: WorldState;
   private queue: Promise<unknown> = Promise.resolve();
   private client: Client | null = null;
+  private gate = new QueueGate(Number(process.env.DCH_MAX_QUEUE) > 0 ? Number(process.env.DCH_MAX_QUEUE) : 8);
   readonly cfg: NetworkConfig;
   log: (msg: string) => void;
 
@@ -29,9 +31,17 @@ export class Game {
 
   /** Serialize every mutating operation so concurrent requests can't interleave ledger steps. */
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(fn, fn);
-    this.queue = run.catch(() => undefined);
-    return run;
+    // QueueGate refuses new work (BusyError -> HTTP 503) once too much is already waiting.
+    return this.gate.run(() => {
+      const run = this.queue.then(fn, fn);
+      this.queue = run.catch(() => undefined);
+      return run;
+    });
+  }
+
+  /** Current queued + running ledger operations (for tests and health). */
+  get queueDepth() {
+    return this.gate.depth;
   }
 
   private async ledger(): Promise<Client> {

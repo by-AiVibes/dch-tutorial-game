@@ -1,6 +1,7 @@
 // DCH game UI: a circuit-board level map (home) plus short step cards per level, with a
 // guided pointer at the next thing to click. Uses textContent everywhere (no innerHTML with data).
-// Only UI position is kept in localStorage (never a seed); game progress comes from the server.
+// Only UI position is kept in localStorage (never a seed); game progress comes from the server,
+// from the player's OWN world, keyed by their wallet address (?world=<address>).
 import { mapState, layout, tracePath, levelKind } from "./mapstate.js";
 import * as W from "./level0.js";
 
@@ -30,12 +31,16 @@ const link = (href, text) => el("a", { href, target: "_blank", rel: "noopener" }
 // ---- UI state (localStorage: step positions, explainers read, Level 0 done; never seeds) ----
 const UI_KEY = "dch-ui-v2";
 const ui = (() => {
-  try { const j = JSON.parse(localStorage.getItem(UI_KEY) || "{}"); return { step: j.step || {}, read: j.read || [], walletDone: !!j.walletDone }; }
-  catch { return { step: {}, read: [], walletDone: false }; }
+  try { const j = JSON.parse(localStorage.getItem(UI_KEY) || "{}"); return { step: j.step || {}, read: j.read || [] }; }
+  catch { return { step: {}, read: [] }; }
 })();
-const saveUi = () => localStorage.setItem(UI_KEY, JSON.stringify({ step: ui.step, read: ui.read, walletDone: ui.walletDone }));
-const me = () => (localStorage.getItem("dch-player") || "").trim() || null;
-const setMe = (v) => localStorage.setItem("dch-player", v.trim());
+const saveUi = () => localStorage.setItem(UI_KEY, JSON.stringify({ step: ui.step, read: ui.read }));
+/** Seat label inside your own world. */
+const me = () => (localStorage.getItem("dch-player") || "").trim() || "you";
+const addr = () => W.currentAddress();
+const wq = () => (addr() ? `?world=${encodeURIComponent(addr())}` : "");
+/** Level 0 is done once your world exists and a seat in it is linked to your wallet. */
+const walletDone = () => !!state?.world && !!addr() && Object.values(state.seats).some((x) => x.wallet === addr());
 
 let state = null;
 let busy = null; // label while a ledger action runs
@@ -51,9 +56,7 @@ async function api(path, body) {
   return j;
 }
 async function refresh() {
-  state = await api("/api/state");
-  const mine = Object.values(state.seats).find((s) => s.player && s.player === me());
-  if (mine?.wallet && !ui.walletDone) { ui.walletDone = true; saveUi(); }
+  state = await api("/api/state" + wq());
   render();
 }
 async function act(label, fn) {
@@ -125,17 +128,19 @@ const pointer = {
       p.style.top = `${Math.round(r.top + scrollY + r.height / 2 - 24)}px`;
       return;
     }
-    const above = r.top > 110;
-    p.className = above ? "" : "up";
-    p.style.left = `${Math.round(r.left + scrollX + r.width / 2 - 20)}px`;
-    p.style.top = `${Math.round(above ? r.top + scrollY - 54 : r.bottom + scrollY + 6)}px`;
+    // No room on the left (narrow screens): point from the right, so the arrow never covers
+    // the text above the target. Outside the target if there's room, else at its inner right edge.
+    p.className = "side-r";
+    const outside = r.right + 50 < innerWidth;
+    p.style.left = `${Math.round((outside ? r.right + 4 : r.right - 46) + scrollX)}px`;
+    p.style.top = `${Math.round(r.top + scrollY + r.height / 2 - 24)}px`;
   },
 };
 addEventListener("resize", () => { pointer.place(); if (route().name === "map") render(); });
 
 // ---- home: the circuit map ----
 function mapScreen() {
-  const ms = mapState(state.levels, { walletDone: ui.walletDone, read: ui.read });
+  const ms = mapState(state.levels, { walletDone: walletDone(), read: ui.read });
   const cols = innerWidth >= 700 ? 3 : 2;
   const L = layout(ms.nodes.length, cols);
   const P = (slot) => L.pos(slot);
@@ -273,23 +278,16 @@ function cardsFor(l) {
 
 function seatChips(roles) {
   const name = me();
+  const world = addr();
   return el("div", { class: "chips" }, roles.map((role) => {
     const s = state.seats[role];
     const mine = s.player && s.player === name;
-    if (mine) return el("button", { class: "chip mine", "data-pt": `leave-${role}`, on: { click: () => act("seat", () => api("/api/seat/release", { role, player: name })) } }, `✓ You: ${role} (leave)`);
+    if (mine) return el("button", { class: "chip mine", "data-pt": `leave-${role}`, on: { click: () => act("seat", () => api("/api/seat/release", { role, player: name, world })) } }, `✓ You: ${role} (leave)`);
     if (s.player) return el("button", { class: "chip", disabled: true }, `${role}: ${s.player}`);
-    return el("button", { class: "chip", "data-pt": `claim-${role}`, ...(name && !busy ? {} : { disabled: true }), on: { click: () => act("seat", async () => {
-      W.currentAddress() ? await W.claimWithWallet(role, name) : await api("/api/seat/claim", { role, player: name });
+    return el("button", { class: "chip", "data-pt": `claim-${role}`, ...(world && state.world && !busy ? {} : { disabled: true }), on: { click: () => act("seat", async () => {
+      try { await W.claimWithWallet(role, name); } catch (e) { alert(e.message); }
     }) } }, `Play ${role}`);
   }));
-}
-function nameField() {
-  const input = el("input", { id: "player", maxlength: "32", placeholder: "Your name, e.g. ada", autocomplete: "nickname", "aria-label": "Your name", "data-pt": "name" });
-  input.value = me() || "";
-  input.addEventListener("input", () => setMe(input.value));
-  input.addEventListener("change", () => { setMe(input.value); render(); });
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { setMe(input.value); input.blur(); render(); } });
-  return input;
 }
 
 function resultBox(r) {
@@ -303,40 +301,35 @@ function resultBox(r) {
 function scoredCards(l) {
   const res = (results[l.id] ||= {});
   const run = (part) => act(part, async () => {
-    try { res[part] = await api(`/api/levels/${l.id}/${part === "goal" ? "goal" : "should-fail"}`, { player: me() }); }
+    try { res[part] = await api(`/api/levels/${l.id}/${part === "goal" ? "goal" : "should-fail"}`, { player: me(), world: addr() }); }
     catch (e) { res[part] = { ok: false, message: "Error: " + e.message }; }
   });
   const waitNote = l.id === "lend" ? "This one waits for the vault's investment phase: about 4 minutes." : "Ledger steps take a few seconds each.";
   const working = (part) => busy === part ? el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), `Working on ${state.network}… ${waitNote}`) : null;
   const roleList = l.goalRoles.join(", ");
 
-  let goalBtn, failBtn, nameIn, firstFree;
+  let goalBtn, failBtn;
+  const noWorld = !state.world;
+  const toLevel0 = () => { ui.step.wallet = 4; saveUi(); go("#/level/wallet"); };
   const cards = [
     { title: l.title, body: [el("p", { class: "lead" }, l.goal)], moreText: [l.bots, l.priority ? "Education Month priority level." : null].filter(Boolean) },
     {
       title: "Pick a seat (optional)",
-      body: (() => {
-        const kids = [el("p", { class: "lead" }, `Seats in this level: ${roleList}. Bots play any seat you leave open.`)];
-        if (!me()) { nameIn = nameField(); kids.push(el("div", { class: "act" }, nameIn)); }
-        const chips = seatChips(l.goalRoles);
-        firstFree = chips.querySelector("button:not(:disabled):not(.mine)");
-        kids.push(chips);
-        return kids;
-      })(),
+      body: [el("p", { class: "lead" }, `Seats in this level: ${roleList}. Bots play any seat you leave open.`), noWorld ? null : seatChips(l.goalRoles)],
       more: false,
-      target: () => (!me() ? nameIn : null),
-      hint: "Type your name, or press Next to let bots play.",
     },
     {
-      title: l.score.goal ? "Goal done ✓" : "Do it",
+      title: l.score.goal ? "Goal done ✓" : noWorld ? "Build your world first" : "Do it",
       body: [
-        el("p", { class: "lead" }, l.score.goal ? "This world already cleared the goal." : `Run the goal on ${state.network}. +10 points.`),
-        el("div", { class: "act" }, goalBtn = el("button", { class: "primary big", "data-pt": "run-goal", ...(busy || !state.world || l.score.goal ? { disabled: true } : {}), on: { click: () => run("goal") } }, "Run level")),
+        el("p", { class: "lead" }, l.score.goal ? "Your world already cleared the goal." : noWorld ? "Levels run in your own world. Build it in Level 0." : `Run the goal on ${state.network}. +10 points.`),
+        el("div", { class: "act" }, goalBtn = noWorld
+          ? el("button", { class: "primary big", "data-pt": "to-l0", on: { click: toLevel0 } }, "Go to Level 0")
+          : el("button", { class: "primary big", "data-pt": "run-goal", ...(busy || l.score.goal ? { disabled: true } : {}), on: { click: () => run("goal") } }, "Run level")),
         working("goal"), resultBox(res.goal),
       ],
       more: false,
       target: () => (!l.score.goal && !busy ? goalBtn : null),
-      hint: "Press Run level.",
+      hint: noWorld ? "Build your world in Level 0 first." : "Press Run level.",
     },
     {
       title: l.score.shouldFail ? "Broken on purpose ✓" : "Now break it",
@@ -361,8 +354,12 @@ function walletCards(l) {
   const net = state.network;
   const address = W.currentAddress();
   const funded = !!l0.bal?.funded;
-  const mySeat = Object.values(state.seats).find((s) => s.player && s.player === me());
-  let genBtn, fundBtn, nameIn, firstSeat;
+  const mySeat = Object.values(state.seats).find((s) => s.wallet && s.wallet === address);
+  let genBtn, fundBtn, firstSeat, worldBtn;
+  const startMyWorld = () => act("world", async () => {
+    l0.worldMsg = "";
+    try { await api("/api/world/start", { world: address }); } catch (e) { l0.worldMsg = e.message; }
+  });
   const doFund = () => act("fund", async () => {
     l0.msg = `Asking the ${net} faucet…`;
     try { l0.bal = await W.fund(state.faucetHost, (m) => { l0.msg = m; render(); }); l0.msg = l0.bal?.funded ? `Funded: ${l0.bal.balanceXrp} test XRP on ${net}.` : "Not on the ledger yet. Wait a moment and try again."; }
@@ -378,7 +375,7 @@ function walletCards(l) {
       title: "Make your wallet",
       body: [
         el("p", { class: "lead" }, "Your browser makes a key pair. The secret (seed) never leaves this page."),
-        el("div", { class: "act" }, genBtn = el("button", { class: "primary big", "data-pt": "gen", on: { click: () => { try { W.generateWallet(); l0.bal = null; l0.seedShown = false; l0.msg = ""; } catch (e) { l0.msg = e.message; } render(); } } }, address ? "Make a new one" : "Generate wallet")),
+        el("div", { class: "act" }, genBtn = el("button", { class: "primary big", "data-pt": "gen", on: { click: () => { try { W.generateWallet(); l0.bal = null; l0.seedShown = false; l0.msg = ""; l0.worldMsg = ""; } catch (e) { l0.msg = e.message; } refresh().catch(() => render()); } } }, address ? "Make a new one" : "Generate wallet")),
         address ? el("p", {}, "Address: ", el("code", {}, address)) : null,
       ],
       more: false,
@@ -406,26 +403,36 @@ function walletCards(l) {
       target: () => (address && !funded && !busy ? fundBtn : null),
       hint: "Press Fund from faucet.",
     },
-    {
+    state.world ? {
       title: mySeat?.wallet ? "Seat claimed ✓" : "Claim a seat",
       body: (() => {
-        const kids = [el("p", { class: "lead" }, mySeat?.wallet ? `You play ${mySeat.role} with your wallet.` : "Your address replaces a bot in one seat.")];
-        nameIn = nameField();
-        kids.push(el("div", { class: "act" }, nameIn));
+        const kids = [el("p", { class: "lead" }, mySeat?.wallet ? `You play ${mySeat.role} with your wallet.` : "Your address replaces a bot in one seat of your world.")];
         const chips = seatChips(Object.keys(state.seats));
         firstSeat = chips.querySelector("button:not(:disabled):not(.mine)");
-        if (address) kids.push(chips); else kids.push(el("p", { class: "note" }, "Make and fund a wallet first."));
+        kids.push(chips);
         return kids;
       })(),
       more: false,
-      target: () => (mySeat?.wallet ? null : !me() ? nameIn : address ? firstSeat : null),
-      hint: !me() ? "Type your name, then press Enter." : "Pick a seat.",
+      target: () => (mySeat?.wallet ? null : firstSeat),
+      hint: "Pick a seat.",
+    } : {
+      title: "Build your world",
+      body: [
+        el("p", { class: "lead" }, "The server funds a fresh set of test accounts just for you, so your progress is yours alone."),
+        el("div", { class: "act" }, worldBtn = el("button", { class: "primary big", "data-pt": "start-world", ...(address && !busy ? {} : { disabled: true }), on: { click: startMyWorld } }, "Start my world")),
+        busy === "world" ? el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), "Funding 6 test accounts from the faucet… about 30 seconds.") : null,
+        l0.worldMsg ? el("p", { class: "result bad", role: "status" }, l0.worldMsg) : null,
+        address ? null : el("p", { class: "note" }, "Make a wallet first: your world is keyed by its address."),
+      ],
+      more: false,
+      target: () => (address && !busy ? worldBtn : null),
+      hint: "Press Start my world.",
     },
-    finishCard(l, ui.walletDone ? "Wallet ready ✓" : "Wallet step", ui.walletDone ? "Switch closed. Level 1 is next." : "Claim a seat with your wallet to close this switch."),
+    finishCard(l, walletDone() ? "Wallet ready ✓" : "Wallet step", walletDone() ? "Switch closed. Level 1 is next." : "Build your world and claim a seat with your wallet to close this switch."),
   ];
 }
 
-// ---- tools: network check, recent results, objects, reset ----
+// ---- tools: network check, recent results, objects, restart my world ----
 function toolsScreen() {
   const s = state, a = s.amendments;
   const objs = el("div", {});
@@ -445,14 +452,17 @@ function toolsScreen() {
       el("button", { on: { click: async () => {
         objs.textContent = "Loading…";
         try {
-          const o = await api("/api/objects");
+          const o = await api("/api/objects" + wq());
           objs.replaceChildren(o.objects.length ? el("table", {}, el("tr", {}, ...["Owner", "Type", "Detail", "ID"].map((h) => el("th", {}, h))),
             o.objects.map((x) => el("tr", {}, el("td", {}, x.owner), el("td", {}, x.type), el("td", {}, x.detail), el("td", {}, x.id.slice(0, 12) + "…")))) : el("p", {}, "No objects yet."));
         } catch (e) { objs.textContent = "Error: " + e.message; }
       } } }, "Load objects"), objs),
     el("div", { class: "panel" }, el("h2", {}, "World"),
-      el("p", {}, `World ${s.world || "none yet"} on ${s.network}. Start over with `, el("code", {}, "npm run dch -- reset-world"), "."),
-      el("button", { title: "Needs DCH_ALLOW_HTTP_RESET=1 on the server", ...(busy ? { disabled: true } : {}), on: { click: () => act("reset", async () => { try { await api("/api/reset-world", {}); } catch (e) { alert(e.message); } }) } }, "Reset world")),
+      el("p", {}, s.owner ? `Your world #${s.world} on ${s.network}, keyed by ${s.owner.slice(0, 8)}…` : `No world of your own yet. Build it in Level 0.`),
+      s.owner && s.world ? el("button", { ...(busy ? { disabled: true } : {}), on: { click: () => {
+        if (!confirm("Start over with a fresh world? Your progress in this world is cleared.")) return;
+        act("reset", async () => { try { await api("/api/world/start", { world: addr(), fresh: true }); for (const k of Object.keys(results)) delete results[k]; } catch (e) { alert(e.message); } });
+      } } }, "Restart my world") : null),
   ];
   return { nodes, target: null, hint: "" };
 }

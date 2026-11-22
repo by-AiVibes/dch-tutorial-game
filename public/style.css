@@ -98,6 +98,9 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; } td, th { bord
 @keyframes bob { 0%, 100% { translate: 0 0; opacity: 1; } 50% { translate: 0 -8px; opacity: .55; } }
 #pointer.up { animation-name: bobup; }
 #pointer.side svg { transform: rotate(-90deg); }
+#pointer.side-r svg { transform: rotate(90deg); }
+#pointer.side-r { animation-name: bobsider; }
+@keyframes bobsider { 0%, 100% { translate: 0 0; opacity: 1; } 50% { translate: 8px 0; opacity: .55; } }
 #pointer.side { animation-name: bobside; }
 @keyframes bobside { 0%, 100% { translate: 0 0; opacity: 1; } 50% { translate: -8px 0; opacity: .55; } }
 @keyframes bobup { 0%, 100% { translate: 0 0; opacity: 1; } 50% { translate: 0 8px; opacity: .55; } }

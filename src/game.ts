@@ -1,4 +1,5 @@
-// Game engine: one world per network, serialized operations, seats, levels, scoring.
+// Game engine: a shared world per network (CLI / instructor) plus one world per player, keyed
+// by the player's classic address. Operations are serialized per world; seats, levels, scoring.
 
 import { Wallet, type Client, type SubmittableTransaction } from "xrpl";
 import { checkAmendments, featureEnabled } from "./amendments.ts";
@@ -8,16 +9,41 @@ import { findLevel, LEVELS, SCORED_LEVELS } from "./levels/index.ts";
 import type { AccountKey, LevelContext } from "./levels/types.ts";
 import { award, judgeShouldFail, MAX_SCORE, total, type Part } from "./scoring.ts";
 import { botSeats, canAct, claimSeat, isRole, releaseSeat, ROLES } from "./seats.ts";
-import { QueueGate } from "./limits.ts";
-import { load, publicView, save, type RecentResult, type WorldState } from "./store.ts";
+import { CapError, QueueGate } from "./limits.ts";
+import { deleteWorld, emptyWorld, listPlayerWorlds, load, publicView, save, type RecentResult, type WorldState } from "./store.ts";
+import { cleanAddress } from "./secrets.ts";
 
 /** Accounts funded per world: the five role seats plus one holder bot. */
 export const WORLD_ACCOUNTS: AccountKey[] = [...ROLES, "holderBot"];
 const RECENT_MAX = 50;
+const envNum = (k: string, d: number) => (Number(process.env[k]) > 0 ? Number(process.env[k]) : d);
+
+/** null = the shared world; otherwise a validated classic address. */
+export type WorldKey = string | null;
+
+export interface WorldCaps {
+  /** Max per-player worlds kept on disk; least-recently-used idle worlds are evicted. */
+  maxWorlds: number;
+  /** A world idle at least this long may be evicted to make room. */
+  minIdleMs: number;
+  /** New per-player worlds per rolling hour, server-wide (each funds 6 faucet accounts). */
+  newPerHour: number;
+}
+export const defaultCaps = (): WorldCaps => ({
+  maxWorlds: envNum("DCH_MAX_WORLDS", 100),
+  minIdleMs: envNum("DCH_WORLD_MIN_IDLE_MS", 3_600_000),
+  newPerHour: envNum("DCH_MAX_NEW_WORLDS_PER_HOUR", 30),
+});
 
 export class Game {
-  private state: WorldState;
-  private queue: Promise<unknown> = Promise.resolve();
+  private shared: WorldState;
+  private worlds = new Map<string, WorldState>();
+  /** owner -> last use (ms), for LRU eviction. Seeded from file times at startup. */
+  private lastUsed = new Map<string, number>();
+  private created: number[] = [];
+  private queues = new Map<string, Promise<unknown>>();
+  readonly caps: WorldCaps;
+  private now: () => number;
   private client: Client | null = null;
   /** Read-only lookups (balances, objects) skip the level queue but have their own small cap. */
   private readGate = new QueueGate(Number(process.env.DCH_MAX_READS) > 0 ? Number(process.env.DCH_MAX_READS) : 4);
@@ -26,20 +52,57 @@ export class Game {
   readonly cfg: NetworkConfig;
   log: (msg: string) => void;
 
-  constructor(cfg: NetworkConfig, log: (msg: string) => void = () => {}) {
+  constructor(cfg: NetworkConfig, log: (msg: string) => void = () => {}, caps: WorldCaps = defaultCaps(), now: () => number = Date.now) {
     this.cfg = cfg;
     this.log = log;
-    this.state = load(cfg.name);
+    this.caps = caps;
+    this.now = now;
+    this.shared = load(cfg.name);
+    for (const w of listPlayerWorlds(cfg.name)) this.lastUsed.set(w.owner, w.mtimeMs);
   }
 
-  /** Serialize every mutating operation so concurrent requests can't interleave ledger steps. */
-  private exclusive<T>(fn: () => Promise<T>): Promise<T> {
-    // QueueGate refuses new work (BusyError -> HTTP 503) once too much is already waiting.
+  /** The world for a key: shared, a stored player world, or an empty (unsaved) one. */
+  private st(key: WorldKey): WorldState {
+    if (key === null) return this.shared;
+    let w = this.worlds.get(key);
+    if (!w) {
+      w = load(this.cfg.name, key);
+      if (w.world) this.worlds.set(key, w);
+    }
+    if (w.world) this.lastUsed.set(key, this.now());
+    return w;
+  }
+
+  private persist(w: WorldState) {
+    save(w);
+    if (w.owner) { this.worlds.set(w.owner, w); this.lastUsed.set(w.owner, this.now()); }
+  }
+
+  /** Validate a world key from the outside: a classic address, or null for the shared world. */
+  static key(raw: unknown): WorldKey {
+    if (raw == null || raw === "") return null;
+    return cleanAddress(raw);
+  }
+
+  /**
+   * Serialize mutating operations per world, so requests can't interleave one world's ledger
+   * steps; different worlds run side by side. QueueGate caps total queued work (BusyError -> 503).
+   */
+  private exclusive<T>(key: WorldKey, fn: () => Promise<T>): Promise<T> {
+    const q = key ?? "";
     return this.gate.run(() => {
-      const run = this.queue.then(fn, fn);
-      this.queue = run.catch(() => undefined);
+      const prev = this.queues.get(q) ?? Promise.resolve();
+      const run = prev.then(fn, fn);
+      const tail = run.catch(() => undefined);
+      this.queues.set(q, tail);
+      void tail.then(() => { if (this.queues.get(q) === tail) this.queues.delete(q); });
       return run;
     });
+  }
+
+  /** Stored per-player worlds (for tests and health). */
+  get worldCount() {
+    return this.lastUsed.size;
   }
 
   /** Current queued + running ledger operations (for tests and health). */
@@ -58,7 +121,8 @@ export class Game {
     if (this.client?.isConnected()) await this.client.disconnect();
   }
 
-  view() {
+  view(key: WorldKey = null) {
+    const state = this.st(key);
     const net = this.cfg.name;
     const fill = (t: string) => t.replaceAll("{network}", net).replaceAll("{Network}", net[0].toUpperCase() + net.slice(1));
     const levels = LEVELS.map((l) => ({
@@ -67,14 +131,16 @@ export class Game {
       goalRoles: l.goalRoles, shouldFailRoles: l.shouldFailRoles, docs: l.docs, explainer: l.explainer?.map(fill) ?? null,
       available: this.levelAvailable(l.id),
       playable: !!l.runGoal && this.levelAvailable(l.id),
-      score: this.state.scores[l.id] ?? { goal: false, shouldFail: false },
+      score: state.scores[l.id] ?? { goal: false, shouldFail: false },
     }));
     return {
-      ...publicView(this.state),
+      ...publicView(state),
+      amendments: this.shared.amendments,
+      owner: key,
       network: this.cfg.name,
       explorer: this.cfg.explorer,
       faucetHost: this.cfg.faucetHost,
-      score: total(this.state.scores),
+      score: total(state.scores),
       maxScore: MAX_SCORE,
       scoredLevels: SCORED_LEVELS.length,
       levels,
@@ -85,21 +151,25 @@ export class Game {
     const l = findLevel(id);
     if (!l) return false;
     if (l.feature === null) return true;
-    return featureEnabled(this.state.amendments, l.feature);
+    return featureEnabled(this.shared.amendments, l.feature);
   }
 
-  claim(role: string, player: string, wallet: string | null = null) {
+  claim(role: string, player: string, wallet: string | null = null, key: WorldKey = null) {
     if (!isRole(role)) throw new Error("unknown role");
-    this.state.seats = claimSeat(this.state.seats, role, player, wallet);
-    save(this.state);
-    return this.view();
+    const state = this.st(key);
+    if (key !== null && !state.world) throw new Error("Start your world first.");
+    state.seats = claimSeat(state.seats, role, player, wallet);
+    this.persist(state);
+    return this.view(key);
   }
 
-  release(role: string, player: string) {
+  release(role: string, player: string, key: WorldKey = null) {
     if (!isRole(role)) throw new Error("unknown role");
-    this.state.seats = releaseSeat(this.state.seats, role, player);
-    save(this.state);
-    return this.view();
+    const state = this.st(key);
+    if (key !== null && !state.world) throw new Error("Start your world first.");
+    state.seats = releaseSeat(state.seats, role, player);
+    this.persist(state);
+    return this.view(key);
   }
 
   /** Level 0: live balance and reserve for a player's address (address only; read-only). */
@@ -121,11 +191,71 @@ export class Game {
   }
 
   refreshAmendments() {
-    return this.exclusive(async () => {
-      this.state.amendments = await checkAmendments(await this.ledger(), this.cfg.name);
-      save(this.state);
-      return this.state.amendments;
+    return this.exclusive(null, async () => {
+      this.shared.amendments = await checkAmendments(await this.ledger(), this.cfg.name);
+      save(this.shared);
+      return this.shared.amendments;
     });
+  }
+
+  /** Fund the accounts a world needs; throws (and funds nothing further) on a faucet failure. */
+  private async fundAccounts(client: Client): Promise<WorldState["accounts"]> {
+    const accounts: WorldState["accounts"] = {};
+    for (const k of WORLD_ACCOUNTS) {
+      this.log(`funding ${k} from the ${this.cfg.name} faucet`);
+      const w = await fundNew(client, this.cfg);
+      accounts[k] = { address: w.address, seed: w.seed as string };
+    }
+    return accounts;
+  }
+
+  /**
+   * "Start my world": a fresh world just for this player (keyed by their classic address),
+   * funded through the same faucet path as reset-world. Returns the existing world unless
+   * fresh = true. Caps: new worlds per hour (429) and stored worlds (LRU-evicts idle ones,
+   * else 503), both with Retry-After.
+   */
+  async startWorld(rawKey: unknown, fresh = false) {
+    const key = Game.key(rawKey);
+    if (key === null) throw new Error("world must be your classic XRPL address (r…)");
+    return this.exclusive(key, async () => {
+      const existing = this.st(key);
+      if (existing.world && !fresh) return this.view(key);
+      const t = this.now();
+      this.created = this.created.filter((x) => t - x < 3_600_000);
+      if (this.created.length >= this.caps.newPerHour) {
+        throw new CapError("Too many new worlds this hour on this server. Try again later.", 429, (this.created[0] + 3_600_000 - t) / 1000);
+      }
+      if (!existing.world) this.makeRoom(key, t);
+      this.created.push(t); // counts even if the faucet fails: the requests were spent
+      const client = await this.ledger();
+      let accounts: WorldState["accounts"];
+      try {
+        accounts = await this.fundAccounts(client);
+      } catch (e) {
+        throw new Error(`${(e as Error).message} Your world wasn't created; try again in a minute.`);
+      }
+      if (!this.shared.amendments) { this.shared.amendments = await checkAmendments(client, this.cfg.name); save(this.shared); }
+      const w: WorldState = { ...emptyWorld(this.cfg.name), owner: key, world: existing.world + 1, createdAt: new Date(t).toISOString(), accounts };
+      this.persist(w);
+      this.log(`player world ${key.slice(0, 6)}… #${w.world} ready on ${this.cfg.name}`);
+      return this.view(key);
+    });
+  }
+
+  /** Keep stored worlds under the cap: evict the least-recently-used idle world, or refuse. */
+  private makeRoom(key: string, t: number) {
+    const others = [...this.lastUsed.entries()].filter(([k]) => k !== key);
+    if (others.length < this.caps.maxWorlds) return;
+    others.sort((a, b) => a[1] - b[1]);
+    const [oldKey, used] = others[0];
+    if (t - used < this.caps.minIdleMs) {
+      throw new CapError("The server is full of active worlds right now. Try again later.", 503, (used + this.caps.minIdleMs - t) / 1000);
+    }
+    deleteWorld(this.cfg.name, oldKey);
+    this.worlds.delete(oldKey);
+    this.lastUsed.delete(oldKey);
+    this.log(`evicted idle world ${oldKey.slice(0, 6)}…`);
   }
 
   /**
@@ -136,22 +266,18 @@ export class Game {
    * network (nothing of value; test networks are reset periodically).
    */
   resetWorld() {
-    return this.exclusive(async () => {
+    return this.exclusive(null, async () => {
       const client = await this.ledger();
-      const accounts: WorldState["accounts"] = {};
+      let accounts: WorldState["accounts"];
       try {
-        for (const k of WORLD_ACCOUNTS) {
-          this.log(`funding ${k} from the ${this.cfg.name} faucet`);
-          const w = await fundNew(client, this.cfg);
-          accounts[k] = { address: w.address, seed: w.seed as string };
-        }
+        accounts = await this.fundAccounts(client);
       } catch (e) {
         throw new Error(`${(e as Error).message} The previous world is unchanged; try reset-world again later.`);
       }
       const amendments = await checkAmendments(client, this.cfg.name);
-      this.state = {
-        ...this.state,
-        world: this.state.world + 1,
+      this.shared = {
+        ...this.shared,
+        world: this.shared.world + 1,
         createdAt: new Date().toISOString(),
         accounts,
         seats: botSeats(),
@@ -161,30 +287,31 @@ export class Game {
         bugs: [],
         amendments,
       };
-      save(this.state);
-      this.log(`world ${this.state.world} ready on ${this.cfg.name}`);
+      save(this.shared);
+      this.log(`world ${this.shared.world} ready on ${this.cfg.name}`);
       return this.view();
     });
   }
 
-  play(levelId: string, part: Part, player: string | null) {
-    return this.exclusive(async () => {
+  play(levelId: string, part: Part, player: string | null, key: WorldKey = null) {
+    return this.exclusive(key, async () => {
+      const state = this.st(key);
       const level = findLevel(levelId);
       if (!level) throw new Error("unknown level");
       if (!this.levelAvailable(levelId)) {
-        return { ok: false, comingSoon: true, message: `Coming soon: ${level.feature} is not enabled on ${this.cfg.name} yet.`, added: 0, view: this.view() };
+        return { ok: false, comingSoon: true, message: `Coming soon: ${level.feature} is not enabled on ${this.cfg.name} yet.`, added: 0, view: this.view(key) };
       }
       const run = part === "goal" ? level.runGoal : level.runShouldFail;
-      if (!run) return { ok: false, comingSoon: true, message: "This level's interactive steps are coming in a later slice.", added: 0, view: this.view() };
-      if (!this.state.world) throw new Error("No world yet. Run reset-world first.");
+      if (!run) return { ok: false, comingSoon: true, message: "This level's interactive steps are coming in a later slice.", added: 0, view: this.view(key) };
+      if (!state.world) throw new Error(key ? "Start your world first (Level 0)." : "No world yet. Run reset-world first.");
       const roles = part === "goal" ? level.goalRoles : level.shouldFailRoles;
-      if (!canAct(this.state.seats, roles, player)) {
+      if (!canAct(state.seats, roles, player)) {
         throw new Error(`Claim one of these seats first: ${roles.join(", ")}.`);
       }
       const client = await this.ledger();
-      const memo = (this.state.memos[levelId] ??= {});
+      const memo = (state.memos[levelId] ??= {});
       const wallet = (k: AccountKey) => {
-        const a = this.state.accounts[k];
+        const a = state.accounts[k];
         if (!a) throw new Error(`world has no ${k} account; run reset-world`);
         return Wallet.fromSeed(a.seed);
       };
@@ -193,20 +320,20 @@ export class Game {
         address: (k) => wallet(k).address,
         submit: async (k, tx) => {
           const r = await submit(client, wallet(k), tx as unknown as SubmittableTransaction);
-          const who = isRole(k) && this.state.seats[k].player ? "human" : "bot";
-          this.record({ ...r, level: levelId, part, note: `${k} (${who})` });
+          const who = isRole(k) && state.seats[k].player ? "human" : "bot";
+          this.record(state, { ...r, level: levelId, part, note: `${k} (${who})` });
           this.log(`${r.type} by ${k}: ${r.engineResult} ${r.hash}`);
           return r;
         },
         note: (m) => this.log(m),
         record: (r, who) => {
-          this.record({ ...r, level: levelId, part, note: who });
+          this.record(state, { ...r, level: levelId, part, note: who });
           this.log(`${r.type} by ${who}: ${r.engineResult} ${r.hash}`);
         },
-        amendmentEnabled: (name) => this.state.amendments?.amendments[name]?.enabled === true,
-        memoOf: (id) => (this.state.memos[id] ??= {}),
+        amendmentEnabled: (name) => this.shared.amendments?.amendments[name]?.enabled === true,
+        memoOf: (id) => (state.memos[id] ??= {}),
         ensureAccount: async (k) => {
-          if (!this.state.accounts[k]) {
+          if (!state.accounts[k]) {
             this.log(`funding ${k} from the ${this.cfg.name} faucet`);
             let w;
             try {
@@ -214,21 +341,21 @@ export class Game {
             } catch (e) {
               throw new Error(`Couldn't fund the ${k} account this level needs. ${(e as Error).message} Try the level again in a minute.`);
             }
-            this.state.accounts[k] = { address: w.address, seed: w.seed as string };
-            save(this.state);
+            state.accounts[k] = { address: w.address, seed: w.seed as string };
+            this.persist(state);
           }
-          return this.state.accounts[k].address;
+          return state.accounts[k].address;
         },
       };
-      const already = this.state.scores[levelId]?.[part];
+      const already = state.scores[levelId]?.[part];
       if (already) {
-        return { ok: true, message: "Already cleared in this world. Reset the world to play it again.", added: 0, results: [], view: this.view() };
+        return { ok: true, message: "Already cleared in this world. Reset the world to play it again.", added: 0, results: [], view: this.view(key) };
       }
       const out = await run(ctx);
       let added = 0;
       let message = out.message;
       if (part === "goal" && out.ok) {
-        ({ board: this.state.scores, added } = award(this.state.scores, levelId, "goal"));
+        ({ board: state.scores, added } = award(state.scores, levelId, "goal"));
       }
       if (part === "shouldFail" && out.attempt) {
         const j = out.verdict
@@ -236,18 +363,18 @@ export class Game {
           : judgeShouldFail(out.attempt.engineResult, out.attempt.validated, level.expectedRejects);
         const label = out.verdict?.label ?? out.attempt.engineResult;
         if (j.verdict === "rejected") {
-          ({ board: this.state.scores, added } = award(this.state.scores, levelId, "shouldFail"));
+          ({ board: state.scores, added } = award(state.scores, levelId, "shouldFail"));
           message = `Rejected, as it should be (${label}). ${level.rejectReason}`;
           if (!j.matchedExpected && level.expectedRejects.length) message += ` Note: expected one of ${level.expectedRejects.join(", ")}.`;
         } else if (j.verdict === "accepted") {
-          this.state.bugs.push(`${levelId}: should-fail was accepted (${out.attempt.hash})`);
+          state.bugs.push(`${levelId}: should-fail was accepted (${out.attempt.hash})`);
           message = `Unexpected: the ledger accepted it (${label}). No points; flagged for maintainers.`;
         } else {
           message = `Inconclusive (${label}): the attempt never reached a final ledger result (network, queue or timeout). No points; try again.`;
         }
       }
-      save(this.state);
-      return { ok: out.ok, message, added, results: out.results, view: this.view() };
+      this.persist(state);
+      return { ok: out.ok, message, added, results: out.results, view: this.view(key) };
     });
   }
 
@@ -255,23 +382,24 @@ export class Game {
    * Live ledger objects owned by this world's accounts (credentials, domains, vaults, loan
    * brokers, loans, offers, trust lines), for the dashboard. Read-only.
    */
-  objects() {
+  objects(key: WorldKey = null) {
+    const state = this.st(key);
     return this.readGate.run(async () => {
       const client = await this.ledger();
       const out: Array<{ owner: string; type: string; id: string; detail: string }> = [];
-      for (const [k, a] of Object.entries(this.state.accounts)) {
+      for (const [k, a] of Object.entries(state.accounts)) {
         const res = await client.request({ command: "account_objects", account: a.address, ledger_index: "validated", limit: 50 });
         for (const o of res.result.account_objects as unknown as Array<Record<string, unknown>>) {
           out.push({ owner: k, type: String(o.LedgerEntryType), id: String(o.index), detail: summarize(o, a.address) });
         }
       }
-      return { network: this.cfg.name, world: this.state.world, objects: out };
+      return { network: this.cfg.name, world: state.world, objects: out };
     });
   }
 
-  private record(r: RecentResult) {
-    this.state.recent.unshift(r);
-    this.state.recent.length = Math.min(this.state.recent.length, RECENT_MAX);
+  private record(state: WorldState, r: RecentResult) {
+    state.recent.unshift(r);
+    state.recent.length = Math.min(state.recent.length, RECENT_MAX);
   }
 }
 

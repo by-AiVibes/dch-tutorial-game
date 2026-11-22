@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.ts";
 import { Game } from "./game.ts";
 import { assertNoSecrets, cleanAddress } from "./secrets.ts";
-import { BusyError, classify, clientIp, RateLimiter, rulesFromEnv } from "./limits.ts";
+import { BusyError, CapError, classify, clientIp, RateLimiter, rulesFromEnv } from "./limits.ts";
 
 const PORT = Number(process.env.PORT || 8790);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -15,10 +15,17 @@ const PUBLIC = join(import.meta.dirname, "..", "public");
 const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css" };
 /** reset-world spends faucet requests; allow it over HTTP only when explicitly enabled. */
 const ALLOW_HTTP_RESET = process.env.DCH_ALLOW_HTTP_RESET === "1";
+/** Seats and level runs in the SHARED world over HTTP. Set 0 on public hosts (players use their own worlds). */
+const SHARED_WORLD_HTTP = () => process.env.DCH_SHARED_WORLD_HTTP !== "0";
 
 function sendBusy(res: ServerResponse, message: string) {
   res.writeHead(503, { "content-type": "application/json", "retry-after": "5", "cache-control": "no-store" });
   res.end(JSON.stringify({ error: message, retryAfterSeconds: 5 }));
+}
+
+function sendCap(res: ServerResponse, e: CapError) {
+  res.writeHead(e.status, { "content-type": "application/json", "retry-after": String(e.retryAfter), "cache-control": "no-store" });
+  res.end(JSON.stringify({ error: e.message, retryAfterSeconds: e.retryAfter }));
 }
 
 function send(res: ServerResponse, status: number, body: unknown) {
@@ -60,7 +67,7 @@ export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv
       return res.end(JSON.stringify({ error: "rate_limited", retryAfterSeconds: wait }));
     }
     handle(game, req, res).catch((e) =>
-      e instanceof BusyError ? sendBusy(res, e.message) : send(res, 400, { error: e instanceof Error ? e.message : String(e) }),
+      e instanceof BusyError ? sendBusy(res, e.message) : e instanceof CapError ? sendCap(res, e) : send(res, 400, { error: e instanceof Error ? e.message : String(e) }),
     );
   };
 }
@@ -73,8 +80,14 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
     return send(res, 400, { error: "invalid_url" });
   }
   const p = url.pathname;
-  if (req.method === "GET" && p === "/api/state") return send(res, 200, game.view());
-  if (req.method === "GET" && p === "/api/objects") return send(res, 200, await game.objects());
+  // ?world=<classic address> selects the player's own world; absent = the shared world.
+  const qWorld = () => {
+    const w = url.searchParams.get("world");
+    if (w) assertNoSecrets(w);
+    return Game.key(w);
+  };
+  if (req.method === "GET" && p === "/api/state") return send(res, 200, game.view(qWorld()));
+  if (req.method === "GET" && p === "/api/objects") return send(res, 200, await game.objects(qWorld()));
   const acct = /^\/api\/account\/([^/]+)$/.exec(p);
   if (req.method === "GET" && acct) {
     assertNoSecrets(decodeURIComponent(acct[1]));
@@ -94,15 +107,19 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
     const b = await body(req);
     assertNoSecrets(b); // before anything else touches or logs the body
     const player = typeof b.player === "string" ? b.player : null;
-    if (p === "/api/seat/claim") return send(res, 200, game.claim(String(b.role), String(b.player), b.wallet == null || b.wallet === "" ? null : cleanAddress(b.wallet)));
-    if (p === "/api/seat/release") return send(res, 200, game.release(String(b.role), String(b.player)));
+    if (p === "/api/world/start") return send(res, 200, await game.startWorld(b.world, b.fresh === true));
+    const key = Game.key(b.world);
+    const sharedOk = key !== null || SHARED_WORLD_HTTP();
+    const sharedOff = () => send(res, 403, { error: "This server runs one world per player: start your world in Level 0." });
+    if (p === "/api/seat/claim") return sharedOk ? send(res, 200, game.claim(String(b.role), String(b.player), b.wallet == null || b.wallet === "" ? null : cleanAddress(b.wallet), key)) : sharedOff();
+    if (p === "/api/seat/release") return sharedOk ? send(res, 200, game.release(String(b.role), String(b.player), key)) : sharedOff();
     if (p === "/api/amendments") return send(res, 200, await game.refreshAmendments());
     if (p === "/api/reset-world") {
       if (!ALLOW_HTTP_RESET) return send(res, 403, { error: "Run `npm run dch -- reset-world`, or start the server with DCH_ALLOW_HTTP_RESET=1." });
       return send(res, 200, await game.resetWorld());
     }
     const m = /^\/api\/levels\/([a-z]+)\/(goal|should-fail)$/.exec(p);
-    if (m) return send(res, 200, await game.play(m[1], m[2] === "goal" ? "goal" : "shouldFail", player));
+    if (m) return sharedOk ? send(res, 200, await game.play(m[1], m[2] === "goal" ? "goal" : "shouldFail", player, key)) : sharedOff();
     return send(res, 404, { error: "not_found" });
   }
   if (req.method === "GET") {

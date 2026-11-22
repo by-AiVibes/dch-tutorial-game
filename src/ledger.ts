@@ -10,6 +10,31 @@ export interface TxResult {
   type: string;
   account: string;
   at: string;
+  /** LedgerEntryType -> index of entries this tx created (e.g. Vault, LoanBroker, Loan). */
+  created?: Record<string, string>;
+}
+
+type Meta = { TransactionResult?: string; AffectedNodes?: Array<{ CreatedNode?: { LedgerEntryType: string; LedgerIndex: string } }> };
+
+export function createdEntries(meta: Meta | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const n of meta?.AffectedNodes ?? []) if (n.CreatedNode) out[n.CreatedNode.LedgerEntryType] = n.CreatedNode.LedgerIndex;
+  return out;
+}
+
+/** Submit an already-signed blob and normalize the result (shared by co-signed flows). */
+export async function submitBlob(client: Client, blob: string, hash: string, type: string, account: string): Promise<TxResult> {
+  const at = new Date().toISOString();
+  try {
+    const res = await client.submitAndWait(blob);
+    const meta = res.result.meta as Meta | undefined;
+    return { hash: res.result.hash, engineResult: meta?.TransactionResult ?? "unknown", validated: res.result.validated === true, type, account, at, created: createdEntries(meta) };
+  } catch (err) {
+    // tem/tef/tel results are rejected before a ledger includes them; xrpl.js throws for those.
+    const msg = err instanceof Error ? err.message : String(err);
+    const code = /\b(te[cfmlr][A-Z_]+)\b/.exec(msg)?.[1] ?? "submitError";
+    return { hash, engineResult: code, validated: false, type, account, at };
+  }
 }
 
 export async function connect(cfg: NetworkConfig): Promise<Client> {
@@ -33,22 +58,5 @@ export async function fundNew(client: Client, cfg: NetworkConfig): Promise<Walle
 export async function submit(client: Client, wallet: Wallet, tx: SubmittableTransaction): Promise<TxResult> {
   const prepared = await client.autofill({ ...tx, Account: wallet.address } as SubmittableTransaction);
   const signed = wallet.sign(prepared);
-  const at = new Date().toISOString();
-  try {
-    const res = await client.submitAndWait(signed.tx_blob);
-    const meta = res.result.meta as { TransactionResult?: string } | undefined;
-    return {
-      hash: res.result.hash,
-      engineResult: meta?.TransactionResult ?? "unknown",
-      validated: res.result.validated === true,
-      type: tx.TransactionType,
-      account: wallet.address,
-      at,
-    };
-  } catch (err) {
-    // tem/tef/tel results are rejected before a ledger includes them; xrpl.js throws for those.
-    const msg = err instanceof Error ? err.message : String(err);
-    const code = /\b(te[cfmlr][A-Z_]+)\b/.exec(msg)?.[1] ?? "submitError";
-    return { hash: signed.hash, engineResult: code, validated: false, type: tx.TransactionType, account: wallet.address, at };
-  }
+  return submitBlob(client, signed.tx_blob, signed.hash, tx.TransactionType, wallet.address);
 }

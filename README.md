@@ -27,7 +27,7 @@ Other commands: `npm run dch -- amendments` (live amendment check), `npm run dch
 | Variable | Default | Notes |
 |---|---|---|
 | `XRPL_NETWORK` | `testnet` | `testnet` or `devnet`. Anything else is refused. |
-| `XRPL_WS` | Ripple's public test server for the network | Any test-network WebSocket, e.g. `wss://testnet.xrpl-labs.com`. Mainnet URLs and `network_id` 0 are refused. |
+| `XRPL_WS` | Ripple's public test server for the network | Any test-network WebSocket, e.g. `wss://testnet.xrpl-labs.com` or `wss://devnet.xrpl-labs.com` (port 443, useful where 51233 is blocked). Mainnet URLs and `network_id` 0 are refused. |
 | `XRPL_FAUCET_HOST` | the network's public faucet | |
 | `PORT` / `HOST` | `8790` / `127.0.0.1` | Dashboard server. |
 | `DCH_ALLOW_HTTP_RESET` | off | Set `1` to allow the dashboard's Reset button (spends faucet requests). |
@@ -49,8 +49,8 @@ Other commands: `npm run dch -- amendments` (live amendment check), `npm run dch
 | 3 | Issue and accept a credential | Credentials | **playable** |
 | 4 | Open a permissioned domain | PermissionedDomains | planned |
 | 5 | Batch: create plus accept | Batch (or BatchV1_1) | **playable** |
-| 6 | Deposit in a single-asset vault | SingleAssetVault | **priority**, gated |
-| 7 | Fund a loan and repay it | SingleAssetVault + LendingProtocol | **priority**, gated |
+| 6 | Deposit in a single-asset vault | SingleAssetVault | **playable** where enabled (devnet), priority |
+| 7 | Fund a loan and repay it | SingleAssetVault + LendingProtocol | **playable** where enabled (devnet), priority |
 | 8 | Explainer: confidential MPT transfers | ConfidentialTransfer | **priority**, read-only until enabled |
 
 **Priority for the next slices:** the Single Asset Vault and Lending Protocol levels (6–7) and
@@ -105,6 +105,30 @@ Smoke run on testnet (world 1, Nov 21 2026):
 
 Goals and should-fails score once per world; re-running a cleared part says so instead of
 sending transactions.
+
+### Levels 6 and 7: vault and lending (devnet smoke, world 1, Nov 21 2026)
+
+On Nov 21 2026 the live check showed SingleAssetVault and LendingProtocol **enabled on devnet,
+not on testnet**, so run these with `XRPL_NETWORK=devnet` (on testnet they show coming soon).
+
+- **Vault.** The lender opens an XRP vault; the holder deposits 10 XRP and the holder bot 5 XRP
+  (each gets vault shares); the holder withdraws its 10 XRP; the vault keeps 5 XRP
+  ([withdraw EDA3F2AB…](https://devnet.xrpl.org/transactions/EDA3F2AB83BE80AE384DFAECCEF34A5FB1DB59977CBD30ABC56264ED990FE351)).
+  Should-fail: the borrower holds no shares and tries to withdraw →
+  [`tecINSUFFICIENT_FUNDS`](https://devnet.xrpl.org/transactions/4816B207E0B3A2CC892D2081525B282FA93D7A64AF1D054614564C7E65BA8927).
+- **Lending.** With **LendingProtocolV1_1** enabled (checked live), a new loan broker can only
+  attach to a **closed-ended** vault, and loans can only start in its Investment phase, with the
+  final payment at least 60 s before redemption
+  ([LoanSet docs](https://xrpl.org/docs/references/protocol/transactions/types/loanset)). The
+  game creates a closed-ended vault (30 s subscription, 240 s term), deposits 40 XRP, opens a
+  broker (debt max 20 XRP), posts 2 XRP first-loss capital, waits for the investment phase, then
+  lender and borrower **co-sign** a 10 XRP loan
+  ([LoanSet 078BAFFF…](https://devnet.xrpl.org/transactions/078BAFFF9433FBCD42706BB8F8A5E17BE0DE2A1C7A115C695F1DFA4088C19645))
+  and the borrower repays it
+  ([LoanPay 297FC2A5…](https://devnet.xrpl.org/transactions/297FC2A56DD7238F773F911FA56D1A2238277FC9EA2CB99C79468CDBA1FF3ACD)).
+  On networks without V1_1 it uses an open vault. Should-fail: a 25 XRP loan above the debt
+  maximum →
+  [`tecLIMIT_EXCEEDED`](https://devnet.xrpl.org/transactions/CEE4DAA31F07F4428230153DB868FDB5D3870BFBCDF43159AA4858D373A3186A).
 
 ## Layout
 

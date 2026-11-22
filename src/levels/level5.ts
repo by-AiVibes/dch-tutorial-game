@@ -3,7 +3,7 @@
 // Facts: https://xrpl.org/docs/concepts/transactions/batch-transactions
 
 import { BatchFlags, GlobalFlags, signMultiBatch, type Batch } from "xrpl";
-import type { TxResult } from "../ledger.ts";
+import { submitBlob, type TxResult } from "../ledger.ts";
 import type { LevelContext, StepOutcome } from "./types.ts";
 import { credentialAccepted } from "./level3.ts";
 import { hex, ledgerEntry } from "./util.ts";
@@ -26,16 +26,7 @@ async function submitBatch(ctx: LevelContext, createType: string, acceptType: st
   const prepared = (await ctx.client.autofill(batch, 1)) as Batch; // 1 batch signer adds to the fee
   signMultiBatch(bot, prepared);
   const signed = issuer.sign(prepared);
-  const at = new Date().toISOString();
-  let r: TxResult;
-  try {
-    const res = await ctx.client.submitAndWait(signed.tx_blob);
-    const meta = res.result.meta as { TransactionResult?: string } | undefined;
-    r = { hash: res.result.hash, engineResult: meta?.TransactionResult ?? "unknown", validated: res.result.validated === true, type: "Batch", account: issuer.address, at };
-  } catch (err) {
-    const code = /\b(te[cfmlr][A-Z_]+)\b/.exec(String(err))?.[1] ?? "submitError";
-    r = { hash: signed.hash, engineResult: code, validated: false, type: "Batch", account: issuer.address, at };
-  }
+  const r = await submitBlob(ctx.client, signed.tx_blob, signed.hash, "Batch", issuer.address);
   ctx.record(r, "issuer + holderBot (batch)");
   return r;
 }

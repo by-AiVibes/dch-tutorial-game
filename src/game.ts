@@ -164,6 +164,7 @@ export class Game {
           this.record({ ...r, level: levelId, part, note: who });
           this.log(`${r.type} by ${who}: ${r.engineResult} ${r.hash}`);
         },
+        amendmentEnabled: (name) => this.state.amendments?.amendments[name]?.enabled === true,
         memoOf: (id) => (this.state.memos[id] ??= {}),
         ensureAccount: async (k) => {
           if (!this.state.accounts[k]) {

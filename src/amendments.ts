@@ -17,6 +17,8 @@ export const FEATURE_AMENDMENTS: Record<string, Requirement[]> = {
   MPTokensV1: ["MPTokensV1"],
   SingleAssetVault: ["SingleAssetVault"],
   LendingProtocol: ["SingleAssetVault", "LendingProtocol"],
+  /** Optional: changes Level 7 rules (closed-ended vaults), not required to play it. */
+  LendingProtocolV1_1: ["LendingProtocolV1_1"],
   ConfidentialTransfer: ["MPTokensV1", "ConfidentialTransfer"],
 };
 

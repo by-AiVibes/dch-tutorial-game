@@ -18,6 +18,8 @@ export interface LevelContext {
   record: (r: TxResult, who: string) => void;
   /** Fund an extra test account from the faucet the first time a level needs it (kept for this world). */
   ensureAccount: (k: AccountKey) => Promise<string>;
+  /** Was this amendment enabled at the world's last live check? */
+  amendmentEnabled: (name: string) => boolean;
   /** Memo of another level in this world (read-only use: prerequisites). */
   memoOf: (levelId: string) => Record<string, unknown>;
   /** Per-world scratch memory for this level (persisted). */

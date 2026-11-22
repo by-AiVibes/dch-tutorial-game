@@ -5,6 +5,8 @@ import { level1 } from "./level1.ts";
 import { level2Runners } from "./level2.ts";
 import { level3Runners } from "./level3.ts";
 import { level5Runners } from "./level5.ts";
+import { level6Runners } from "./level6.ts";
+import { level7Runners } from "./level7.ts";
 import type { LevelDef } from "./types.ts";
 
 const planned = (d: Omit<LevelDef, "runGoal" | "runShouldFail">): LevelDef => d;
@@ -55,32 +57,35 @@ export const LEVELS: LevelDef[] = [
     bots: "The counterparty bot signs its half of the batch.",
     docs: [{ title: "Batch transactions", href: "https://xrpl.org/docs/concepts/transactions/batch-transactions" }],
   }, level5Runners),
-  planned({
+  live({
     id: "vault", n: 6, title: "Deposit in a single-asset vault", feature: "SingleAssetVault", priority: true,
-    goal: "Deposit the test token into a vault, receive shares, and withdraw only your share.",
-    shouldFail: "Withdraw more than your shares are worth, or withdraw from an account that holds no shares.",
+    goal: "The lender opens an XRP vault; the holder and a holder bot deposit and get shares; the holder withdraws only its own share.",
+    shouldFail: "The borrower, who holds no shares, tries to withdraw from the vault.",
     rejectReason: "A vault pays out only against shares the account holds.",
-    expectedRejects: ["tecINSUFFICIENT_FUNDS", "tecNO_PERMISSION"],
+    expectedRejects: ["tecINSUFFICIENT_FUNDS"],
     goalRoles: ["holder", "lender"], shouldFailRoles: ["holder", "lender", "borrower"],
     bots: "Other holder bots deposit so the vault has more than one shareholder. The auditor tracks shares.",
     docs: [
       { title: "Single asset vaults", href: "https://xrpl.org/docs/concepts/tokens/single-asset-vaults" },
+      { title: "VaultWithdraw", href: "https://xrpl.org/docs/references/protocol/transactions/types/vaultwithdraw" },
       { title: "Known amendments", href: "https://xrpl.org/resources/known-amendments" },
     ],
-  }),
-  planned({
+  }, level6Runners),
+  live({
     id: "lend", n: 7, title: "Fund a loan and repay it", feature: "LendingProtocol", priority: true,
-    goal: "The lender sets up a loan broker on a vault; a borrower takes a fixed-term loan and repays it.",
-    shouldFail: "Draw a loan the broker's terms don't allow, or pull vault funds that cover open loans.",
-    rejectReason: "The protocol rejects actions that break the broker's terms or the vault's cover.",
-    expectedRejects: ["tecNO_PERMISSION", "tecINSUFFICIENT_FUNDS"],
+    goal: "The lender funds its vault, opens a loan broker with first-loss capital, co-signs a 10 XRP loan with the borrower, and the borrower repays it.",
+    shouldFail: "The borrower and lender try to open a 25 XRP loan, above the broker's 20 XRP debt maximum.",
+    rejectReason: "A loan that would push the broker past its DebtMaximum is rejected.",
+    expectedRejects: ["tecLIMIT_EXCEEDED"],
     goalRoles: ["lender", "borrower"], shouldFailRoles: ["borrower", "lender", "holder"],
     bots: "The other side of the loan is a bot. The auditor watches the loan object through fund, draw, and repay.",
     docs: [
       { title: "Lending protocol", href: "https://xrpl.org/docs/concepts/tokens/lending-protocol" },
+      { title: "LoanSet", href: "https://xrpl.org/docs/references/protocol/transactions/types/loanset" },
+      { title: "VaultCreate (closed-ended vaults)", href: "https://xrpl.org/docs/references/protocol/transactions/types/vaultcreate" },
       { title: "Known amendments", href: "https://xrpl.org/resources/known-amendments" },
     ],
-  }),
+  }, level7Runners),
   planned({
     id: "confidential", n: 8, title: "Explainer: confidential MPT transfers", feature: "ConfidentialTransfer", priority: true,
     goal: "Read-only explainer while the amendment is in voting: what stays public and what becomes private.",

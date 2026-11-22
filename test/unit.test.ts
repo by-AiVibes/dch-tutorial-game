@@ -95,3 +95,9 @@ test("store: public view never contains seeds", async () => {
   assert.ok(json.includes("rTEST"));
   assert.ok(!json.includes("sSECRET") && !json.includes("seed"));
 });
+
+test("levels: interactive runners where expected", () => {
+  const live = LEVELS.filter((l) => l.runGoal && l.runShouldFail).map((l) => l.id);
+  assert.deepEqual(live, ["issue", "freeze", "creds", "batch", "vault", "lend"]);
+  assert.ok(LEVELS.find((l) => l.id === "confidential")?.explainer?.length);
+});

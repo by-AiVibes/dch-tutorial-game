@@ -3,8 +3,9 @@
 //
 //   npm run e2e -- --url https://game.dch.everhostx.com
 //
-// Playwright headless Chromium at iPhone size (375x667, Mobile Safari user agent), Node 22+,
-// macOS or Linux. Test networks only: it reads /api/state first and stops unless the server
+// Playwright headless Chromium at iPhone size (375x667, Mobile Safari user agent), macOS or
+// Linux, Node 20+ (plain JS, no TypeScript imports: the server's 22.18 isn't needed here).
+// Test networks only: it reads /api/state first and stops unless the server
 // says devnet or testnet. It never opens a wallet app; the game page makes a throwaway test
 // wallet in the browser, and only that wallet's ADDRESS is kept (in ./.e2e-player.json) so later
 // runs reuse the same world (the server allows 3 new worlds per hour per IP). No seed is stored.
@@ -23,10 +24,11 @@
 //   --level <K>        test only Level K (0-8); earlier unfinished levels are played first as setup
 //   --fresh            start a new wallet + world instead of reusing ./.e2e-player.json
 //   --wrong <levelId>  answer that level's first quiz question wrong (tests the "why" line)
+//   --latency <ms>     add this delay to every game API call (tests slow networks)
 //   --out <dir>        output folder (default ./e2e-out)   --headed   --max-minutes <n> (default 30 per run)
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { ANSWER_KEY, likelyCode, scrub } from "./lib.mjs";
+import { ANSWER_KEY, headline, likelyCode, networkAmendments, scrub, skipVerdict } from "./lib.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : true) : dflt; };
@@ -39,12 +41,14 @@ const WRONG = opt("wrong", "");
 const RUNS = Number(opt("runs", 1));
 const ONLY = opt("level", null) === null ? null : Number(opt("level"));
 const MAX_MS = Number(opt("max-minutes", 30)) * 60_000;
+const LATENCY = Number(opt("latency", 0)); // ms added to every game API call (simulates a slow phone network)
 if (!Number.isInteger(RUNS) || RUNS < 1 || RUNS > 20 || (ONLY !== null && !(Number.isInteger(ONLY) && ONLY >= 0 && ONLY <= 8))) {
   console.error("Usage: npm run e2e -- --url <game url> [--runs 1-20] [--level 0-8] [--fresh] [--wrong <levelId>]");
   process.exit(2);
 }
-const major = Number(process.versions.node.split(".")[0]);
-if (major < 22) { console.error(`Node 22 or newer is needed (this is ${process.versions.node}).`); process.exit(2); }
+// The e2e is plain JS (no TypeScript imports), so any Node that Playwright supports works.
+const [major] = process.versions.node.split(".").map(Number);
+if (major < 20) { console.error(`Node 20 or newer is needed for the e2e (this is ${process.versions.node}).`); process.exit(2); }
 
 let chromium;
 try { ({ chromium } = await import("playwright")); }
@@ -65,7 +69,9 @@ if (!["devnet", "testnet"].includes(st.network)) {
   writeFileSync(join(OUT, "report.md"), `DCH e2e: FAIL (setup)\nServer network is ${st.network}, not a test network. Nothing was played.\n`);
   process.exit(2);
 }
-const LEVELS = st.levels.filter((l) => l.available !== false).sort((a, b) => a.n - b.n);
+// All levels: a server that just started may not have checked its amendments yet, so availability
+// is read from the player's own world at the end of each run (unavailable = skipped, not failed).
+const LEVELS = [...st.levels].sort((a, b) => a.n - b.n);
 const target = ONLY === null ? null : LEVELS.find((l) => l.n === ONLY);
 if (ONLY !== null && !target) { console.error(`Level ${ONLY} isn't playable on ${st.network} right now.`); process.exit(2); }
 
@@ -80,6 +86,7 @@ const ctx = await browser.newContext({
   userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1",
 });
 const page = await ctx.newPage();
+if (LATENCY > 0) await page.route(`${BASE}/api/**`, async (r) => { await sleep(LATENCY); await r.continue(); });
 let apiLog = [], consoleLog = [], shotN = 0;
 page.on("console", (m) => { if (m.type() === "error") consoleLog.push(scrub(m.text())); });
 page.on("pageerror", (e) => consoleLog.push(scrub(e.message)));
@@ -105,7 +112,7 @@ const read = () => page.evaluate(() => {
   return {
     hash: location.hash, title: q("#cardtitle")?.textContent || q(".maphead h1")?.textContent || q(".card h2")?.textContent || "",
     hint: q("#hint")?.textContent || "", target: t?.dataset.pt || null, score: [...document.querySelectorAll("#stats .pill b")].map((b) => b.textContent).join(" | "),
-    busy: !!q(".spinner"), bad: [...document.querySelectorAll(".result.bad")].map((x) => x.textContent).join(" / "),
+    busy: !!q(".spinner") || !!document.body.dataset.busy, bad: [...document.querySelectorAll(".result.bad")].map((x) => x.textContent).join(" / "),
     lead: q(".card .lead")?.textContent || "",
     choices: [...document.querySelectorAll(".choice")].map((b) => ({ pt: b.dataset.pt, text: b.textContent, disabled: b.disabled })),
     next: n ? { pt: n.dataset.pt, text: n.textContent, off: n.disabled || n.getAttribute("aria-disabled") === "true" } : null,
@@ -213,7 +220,11 @@ async function playOnce(run) {
     }
     if (s.target) { await step(s, s.target, () => click(s.target)); continue; }
     if (s.next && !s.next.off) { await step(s, "next", () => click(s.next.pt)); continue; }
-    await record(s, "dead end", true, `nothing to press (hint: "${scrub(s.hint)}")`);
+    // Nothing to press right now: give a slow response a moment before calling it a dead end.
+    let later = s;
+    for (let w = 0; w < 20 && !later.target && !(later.next && !later.next.off) && !later.choices.some((c) => !c.disabled); w++) { await sleep(500); later = await read(); }
+    if (later.target || (later.next && !later.next.off) || later.choices.some((c) => !c.disabled)) continue;
+    await record(later, "dead end", true, `nothing to press after 10 s (hint: "${scrub(later.hint)}")`);
     break;
   }
   if (Date.now() - t0 >= MAX_MS) steps.push({ run, level: "run", step: "timeout", action: "timeout", result: "FAIL", ms: MAX_MS, screenError: `run took over ${MAX_MS / 60000} minutes`, api: [], consoleErrors: [], shot: await shot("TIMEOUT"), likelyCode: "see the last step" });
@@ -221,10 +232,22 @@ async function playOnce(run) {
   const view = await (await fetch(`${BASE}/api/state?world=${encodeURIComponent(saved?.address || "")}`)).json().catch(() => null);
   for (const l of view?.levels || []) {
     const r = levels[l.id];
+    if (r && l.available === false) {
+      netReport ??= await networkAmendments(st.network);
+      const v = skipVerdict(l, st.network, netReport);
+      r.status = v.status; r.skipped = !v.fail;
+      if (v.fail) {
+        r.errors.push(v.status);
+        steps.push({ run, level: l.id, step: "coming soon", action: "skip check", result: "FAIL", ms: 0, score: "", screenError: v.status, api: [], consoleErrors: [], shot: "", likelyCode: "src/amendments.ts featureEnabled() (copy: e2e/amendments.mjs); src/game.ts levelAvailable() / refreshAmendments()" });
+      }
+      continue;
+    }
     if (r && r.status !== "FAIL" && !r.errors.length && (l.quiz ? l.quiz.passed : true) && (l.n === 0 || l.n === 8 || (l.score.goal && l.score.shouldFail))) r.status = r.status === "NOT REACHED" ? "PASS (done earlier in this world)" : "PASS";
   }
   return { steps, levels, graduated, seconds: Math.round((Date.now() - t0) / 1000), score: view ? `${view.score}/${view.maxScore}` : "?" };
 }
+
+let netReport; // what the network itself reports (only fetched if a level was skipped)
 
 // ---- runs ----
 const results = [];
@@ -241,16 +264,18 @@ await browser.close().catch(() => {});
 // ---- reports ----
 const allSteps = results.flatMap((r) => r.steps);
 const fails = allSteps.filter((s) => s.result === "FAIL");
-const levelPass = (r, l) => (r.levels[l.id].setup ? true : r.levels[l.id].status.startsWith("PASS"));
+const levelPass = (r, l) => (r.levels[l.id].setup ? true : /^(PASS|SKIPPED)/.test(r.levels[l.id].status));
+const skippedIn = (r) => LEVELS.filter((l) => (!target || l.id === target.id) && r.levels[l.id].skipped).length;
+const maxSkipped = Math.max(0, ...results.map(skippedIn));
 const runOk = (r) => LEVELS.every((l) => (target && l.id !== target.id) || levelPass(r, l)) && (target ? true : r.graduated);
 const overall = !crash && results.length === RUNS && results.every(runOk) && fails.length === 0 ? "PASS" : "FAIL";
 writeFileSync(join(OUT, "report.json"), JSON.stringify({
-  tool: "dch e2e playthrough", url: BASE, network: st.network, overall, runs: RUNS, level: target ? target.n : null, crash,
+  tool: "dch e2e playthrough", url: BASE, network: st.network, overall: headline(overall === "PASS", maxSkipped), skipped: maxSkipped, runs: RUNS, level: target ? target.n : null, crash,
   results: results.map((r, i) => ({ run: i + 1, seconds: r.seconds, score: r.score, graduated: r.graduated, levels: Object.entries(r.levels).map(([id, l]) => ({ id, ...l })) })),
   fails, steps: allSteps,
 }, null, 2));
 const lines = [
-  `DCH e2e: ${overall}`,
+  `DCH e2e: ${headline(overall === "PASS", maxSkipped)}`,
   `URL: ${BASE} (${st.network}). Runs: ${RUNS}.${target ? ` Level ${target.n} only.` : ""} ${new Date().toISOString().slice(0, 16)} UTC.`,
   crash ? `Crash: ${crash}` : null,
   "",
@@ -261,10 +286,10 @@ const lines = [
     ` | likely code: ${f.likelyCode} | screenshot: ${f.shot}`) : ["none"]),
   "",
   ...results.flatMap((r, i) => [
-    `RUN ${i + 1}: ${runOk(r) ? "PASS" : "FAIL"}, ${r.seconds} s, score ${r.score}, graduate card ${target ? "not tested" : r.graduated ? "PASS" : "FAIL"}`,
+    `RUN ${i + 1}: ${headline(runOk(r), skippedIn(r))}, ${r.seconds} s, score ${r.score}, graduate card ${target ? "not tested" : r.graduated ? "PASS" : "FAIL"}`,
     ...LEVELS.filter((l) => !target || l.id === target.id).map((l) => {
       const x = r.levels[l.id];
-      const ok = x.status.startsWith("PASS");
+      const ok = /^(PASS|SKIPPED)/.test(x.status);
       return `Level ${l.n} ${l.id}: ${ok ? x.status : "FAIL"}${!ok && x.status !== "FAIL" ? ` (${x.status.toLowerCase()})` : ""}, ${Math.round(x.ms / 1000)} s${x.errors.length ? ` | ${x.errors[0]}` : ""}`;
     }),
   ]),

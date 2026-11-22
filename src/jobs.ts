@@ -22,6 +22,18 @@ export interface Job {
   errorStatus?: number;
 }
 
+/**
+ * What a finished job keeps: the message, points and score, plus the last few transaction
+ * results the page links to. Never the whole world view (that is re-read with /api/state).
+ */
+export function slimResult(r: unknown): unknown {
+  if (!r || typeof r !== "object") return r;
+  const o = r as Record<string, unknown>;
+  const view = o.view as { score?: number; maxScore?: number } | undefined;
+  const results = Array.isArray(o.results) ? (o.results as Record<string, unknown>[]).slice(-4).map((t) => ({ type: t.type, engineResult: t.engineResult, hash: t.hash })) : [];
+  return { ok: o.ok, message: o.message, added: o.added ?? 0, ...(o.comingSoon ? { comingSoon: true } : {}), ...(view ? { score: view.score, maxScore: view.maxScore } : {}), results };
+}
+
 export const JOB_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 
 export class JobStore {
@@ -46,7 +58,7 @@ export class JobStore {
     const job: Job = { id: randomBytes(16).toString("base64url"), status: "running", slot, startedAt: this.now() };
     this.jobs.set(job.id, job);
     fn().then(
-      (r) => { job.status = "done"; job.result = r; job.finishedAt = this.now(); },
+      (r) => { job.status = "done"; job.result = slimResult(r); job.finishedAt = this.now(); },
       (e) => { job.status = "error"; job.error = e instanceof Error ? e.message : String(e); job.errorStatus = errorStatus(e); job.finishedAt = this.now(); },
     );
     return job;
@@ -60,7 +72,8 @@ export class JobStore {
   /** What the browser sees: never the slot (it holds the world address). */
   static view(j: Job) {
     return { job: j.id, status: j.status, elapsedSeconds: Math.round(((j.finishedAt ?? Date.now()) - j.startedAt) / 1000),
-      ...(j.status === "done" ? { result: j.result } : {}), ...(j.status === "error" ? { error: j.error } : {}) };
+      ...(j.status === "done" ? { result: j.result } : {}),
+      ...(j.status === "error" ? { error: j.error, errorStatus: j.errorStatus ?? 400, busy: j.errorStatus === 503 || j.errorStatus === 429 } : {}) };
   }
 
   get size() { return this.jobs.size; }

@@ -32,6 +32,9 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const findings = [];
 const flag = async (kind, msg) => { const f = await shot(kind + "-" + msg); findings.push({ kind, msg, shot: f }); log("FLAG", kind, msg, f || ""); };
 
+// Test networks only: refuse anything that isn't devnet or testnet before touching the page.
+const net = await fetch(`${BASE}/api/state`).then((r) => r.json()).then((j) => j.network, () => null);
+if (!["devnet", "testnet"].includes(net)) { console.error(`refusing: ${BASE} reports network ${JSON.stringify(net)} (devnet/testnet only)`); chrome.kill(); process.exit(2); }
 await send("Runtime.enable"); await send("Log.enable"); await send("Page.enable");
 await send("Network.enable"); await send("Network.setUserAgentOverride", { userAgent: UA, platform: "iPhone" });
 await send("Emulation.setDeviceMetricsOverride", { width: 375, height: VH, deviceScaleFactor: 2, mobile: true });
@@ -48,7 +51,7 @@ const read = () => ev(`(() => {
     hash: location.hash, title: q("#cardtitle")?.textContent || q(".maphead h1")?.textContent || q(".card h2")?.textContent || "",
     crumbs: q(".crumbs span")?.textContent || "", hint: q("#hint")?.textContent || "", target: t?.dataset.pt || null,
     stats: [...document.querySelectorAll("#stats .pill b")].map((b) => b.textContent).join(" | "),
-    busy: !!q(".spinner"), bad: [...document.querySelectorAll(".result.bad")].map((x) => x.textContent).join(" / ").slice(0, 240),
+    busy: !!q(".spinner") || !!document.body.dataset.busy, bad: [...document.querySelectorAll(".result.bad")].map((x) => x.textContent).join(" / ").slice(0, 240),
     lead: q(".card .lead")?.textContent?.slice(0, 160) || q(".maphead p")?.textContent || "",
     choices: [...document.querySelectorAll(".choice")].map((b) => ({ pt: b.dataset.pt, text: b.textContent, disabled: b.disabled })),
     next: (() => { const n = q('[data-pt^="next-"]'); return n ? { pt: n.dataset.pt, text: n.textContent, disabled: n.disabled || n.getAttribute("aria-disabled") === "true" } : null; })(),
@@ -122,7 +125,7 @@ try {
     }
     if (s.target) { await click(s.target); continue; }
     if (s.next && !s.next.disabled) { await click(s.next.pt); continue; }
-    if (s.next && s.next.disabled) { await flag("deadend", `${s.hash} ${s.title}: no pointer target and Next disabled`); await sleep(2000); continue; }
+    if (s.next && s.next.disabled) { await sleep(1500); if (JSON.stringify(await read()) !== JSON.stringify(s)) continue; await flag("deadend", `${s.hash} ${s.title}: no pointer target and Next disabled`); await sleep(2000); continue; }
     await flag("deadend", `${s.hash} ${s.title}: nothing to press`);
     break;
   }

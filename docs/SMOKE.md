@@ -19,7 +19,7 @@ creds shouldFail: OK +10 | Rejected, as it should be (tecNO_ENTRY). Only the cre
     CredentialAccept:tecNO_ENTRY:8C0A4BC3669D06BA12E5F723FCED7D43123AF9BFC1DECE2BA40BA832D83636FA
 domain goal: OK +10 | The holder's offer is live in the permissioned domain.
     PermissionedDomainSet:tesSUCCESS:EF6419D3AD7EEFD15CCB4915BAF84C571563574B16CC9A0F9BE4AF21ECEE27E8 OfferCreate:tesSUCCESS:B324379C68F426C0DE629DF671279AD68B4CFFB84C2CFF922AD963E9D0D4CA9F
-domain shouldFail: OK +10 | Rejected, as it should be (tecNO_PERMISSION). The domain admits only accounts that hold an accepted credential it lists.
+domain shouldFail: OK +10 | Rejected, as it should be (tecNO_PERMISSION). Apart from its owner, the domain admits only accounts holding an accepted, unexpired credential it lists.
     OfferCreate:tecNO_PERMISSION:EEBB01735E82EA2CDBC5AA2B5E56527E18AA82F33CEB75840133A486C85C63EE
 batch goal: OK +10 | Both inner transactions applied together: the credential exists and is accepted.
     Batch:tesSUCCESS:EF71BB3556C4456A2D9B354892C7081B00D8259FC860F5B3B4237A0FD85266E4

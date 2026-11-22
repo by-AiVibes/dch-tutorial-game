@@ -62,7 +62,7 @@ export const DIAG = {
   "lend:goal": { nodes: [n("vault", "vault"), n("briefcase", "loan broker"), n("person", "borrower")], links: ["funds", "10 XRP loan"], caption: ["The broker lends vault funds, backed by first-loss cover.", "The borrower repays the loan."] },
   "lend:fail": { nodes: [n("briefcase", "loan broker"), n("person", "borrower")], links: ["25 XRP loan"], bad: 0, caption: ["Above the broker's 20 XRP debt maximum: refused."] },
   // Level 8 (explainer parts)
-  "confidential:p0": { nodes: [n("coin", "MPT"), n("wallet", "account")], links: ["held directly"], caption: ["No trust line: the holder opts in with an MPToken entry."] },
+  "confidential:p0": { nodes: [n("coin", "MPT"), n("wallet", "account")], links: ["opts in"], caption: ["No trust line: the holder opts in with an MPToken entry."] },
   "confidential:p1": { nodes: [n("server", "this game"), n("ledger", "test network")], links: ["live check"], caption: ["The game checks the amendment live; it never assumes."] },
   "confidential:p2": { nodes: [n("coin", "amount"), n("eyeoff", "hidden"), n("check", "proof valid", "ok")], links: ["encrypt", "ZK proof"], caption: ["Balances and amounts are shielded from public view;", "the ledger still verifies each transfer."] },
   "confidential:p3": { nodes: [n("person", "issuer / auditor"), n("coin", "balance", "ok")], links: ["decrypts"], caption: ["The issuer (and an auditor, if set) can decrypt balances.", "Total supply stays public."] },

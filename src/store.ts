@@ -35,6 +35,8 @@ export interface WorldState {
   amendments: AmendmentReport | null;
   /** Per-player worlds: the player's classic address (public). Absent for the shared world. */
   owner?: string | null;
+  /** Graduation award for this world: a random id (the share link) and the UTC completion date. */
+  award?: { id: string; date: string } | null;
 }
 
 export function emptyWorld(network: string): WorldState {

@@ -91,7 +91,7 @@ test("browser UI code never stores or sends a seed", async () => {
     assert.ok(!/localStorage\.setItem\([^)]*seed/i.test(src), `${f}: seed must not be stored`);
     for (const m of src.matchAll(/JSON\.stringify\(([^)]*)\)/g)) assert.ok(!/seed/i.test(m[1]), `${f}: request body ${m[1]}`);
     assert.ok(!/console\.\w+\([^)]*seed/i.test(src), `${f}: seed must not be logged`);
-    assert.ok(!/https?:\/\/(?!xrpl\.org|\$\{|www\.w3\.org\/2000\/svg)/.test(src), `${f}: no external hosts besides the faucet`);
+    assert.ok(!/https?:\/\/(?!xrpl\.org|\$\{|www\.w3\.org\/2000\/svg|x\.com\/intent\/post\?)/.test(src), `${f}: no external hosts besides the faucet (and the X share link the player opens)`);
   }
 });
 

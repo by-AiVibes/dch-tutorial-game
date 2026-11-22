@@ -6,6 +6,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.ts";
 import { Game } from "./game.ts";
+import { AWARD_ID_RE, awardHtml, awardPng, loadAward, publicBase } from "./award.ts";
 import { assertNoSecrets, cleanAddress } from "./secrets.ts";
 import { BusyError, CapError, classify, clientIp, RateLimiter, rulesFromEnv } from "./limits.ts";
 
@@ -66,13 +67,13 @@ export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv
       res.writeHead(429, { "content-type": "application/json", "retry-after": String(wait), "cache-control": "no-store" });
       return res.end(JSON.stringify({ error: "rate_limited", retryAfterSeconds: wait }));
     }
-    handle(game, req, res).catch((e) =>
+    handle(game, req, res, trustProxy).catch((e) =>
       e instanceof BusyError ? sendBusy(res, e.message) : e instanceof CapError ? sendCap(res, e) : send(res, 400, { error: e instanceof Error ? e.message : String(e) }),
     );
   };
 }
 
-async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
+async function handle(game: Game, req: IncomingMessage, res: ServerResponse, trustProxy = false) {
   let url: URL;
   try {
     url = new URL(req.url ?? "/", "http://localhost");
@@ -100,6 +101,19 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
     assertNoSecrets(decodeURIComponent(acct[1]));
     return send(res, 200, await game.account(cleanAddress(decodeURIComponent(acct[1]))));
   }
+  // Graduation award share page and image (looked up by random id; the address never appears).
+  const aw = /^\/award\/([A-Za-z0-9_-]{24})(\.png)?$/.exec(p);
+  if (req.method === "GET" && aw && AWARD_ID_RE.test(aw[1])) {
+    const rec = loadAward(aw[1]);
+    if (!rec) return send(res, 404, { error: "not_found" });
+    if (aw[2]) {
+      const png = awardPng(rec);
+      res.writeHead(200, { "content-type": "image/png", "content-length": String(png.length), "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" });
+      return res.end(png);
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" });
+    return res.end(awardHtml(rec, publicBase(req.headers.host, trustProxy)));
+  }
   if (req.method === "GET" && VENDOR[p]) {
     let data: Buffer;
     try {
@@ -115,6 +129,7 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
     assertNoSecrets(b); // before anything else touches or logs the body
     const player = typeof b.player === "string" ? b.player : null;
     if (p === "/api/world/start") return send(res, 200, await game.startWorld(b.world, b.fresh === true));
+    if (p === "/api/award") return send(res, 200, await game.graduate(b.world, b.name));
     const key = Game.key(b.world);
     const sharedOk = key !== null || SHARED_WORLD_HTTP();
     const sharedOff = () => send(res, 403, { error: "This server runs one world per player: start your world in Level 0." });

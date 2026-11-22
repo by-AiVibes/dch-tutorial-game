@@ -10,6 +10,7 @@ import type { AccountKey, LevelContext } from "./levels/types.ts";
 import { award, judgeShouldFail, MAX_SCORE, total, type Part } from "./scoring.ts";
 import { botSeats, canAct, claimSeat, isRole, releaseSeat, ROLES } from "./seats.ts";
 import { CapError, QueueGate } from "./limits.ts";
+import { awardCount, cleanName, loadAward, newAwardId, saveAward, SHORT, type AwardRecord } from "./award.ts";
 import { deleteWorld, emptyWorld, listPlayerWorlds, load, publicView, save, type RecentResult, type WorldState } from "./store.ts";
 import { cleanAddress } from "./secrets.ts";
 
@@ -28,8 +29,11 @@ export interface WorldCaps {
   minIdleMs: number;
   /** New per-player worlds per rolling hour, server-wide (each funds 6 faucet accounts). */
   newPerHour: number;
+  /** Max stored graduation awards (each is a small JSON record plus a cached PNG). */
+  maxAwards?: number;
 }
 export const defaultCaps = (): WorldCaps => ({
+  maxAwards: envNum("DCH_MAX_AWARDS", 2000),
   maxWorlds: envNum("DCH_MAX_WORLDS", 100),
   minIdleMs: envNum("DCH_WORLD_MIN_IDLE_MS", 3_600_000),
   newPerHour: envNum("DCH_MAX_NEW_WORLDS_PER_HOUR", 30),
@@ -259,6 +263,58 @@ export class Game {
       this.log(`player world ${key.slice(0, 6)}… #${w.world} ready on ${this.cfg.name}`);
       return this.view(key);
     });
+  }
+
+  /**
+   * Graduation: only when this player's own world really has every level complete, checked on
+   * the server: a seat linked to the player's address (Level 0) and both parts of every scored
+   * level that is available on this network. Returns the award (stable random id per world).
+   */
+  async graduate(rawKey: unknown, rawName: unknown) {
+    const key = Game.key(rawKey);
+    if (key === null) throw new Error("world must be your classic XRPL address (r…)");
+    const name = cleanName(rawName);
+    return this.exclusive(key, async () => {
+      const state = this.st(key);
+      const missing = this.unfinished(state, key);
+      if (missing.length) throw new Error(`Not graduated yet: finish ${missing.join(", ")} first.`);
+      this.touch(key);
+      let rec = state.award ? loadAward(state.award.id) : null;
+      if (!rec) {
+        if (awardCount() >= (this.caps.maxAwards ?? 2000)) throw new CapError("Too many awards stored on this server right now. Try again later.", 503, 3600);
+        const date = state.award?.date ?? new Date(this.now()).toISOString().slice(0, 10);
+        state.award = { id: newAwardId(), date };
+        this.persist(state);
+      }
+      const next: AwardRecord = {
+        id: state.award!.id, network: this.cfg.name, name, score: total(state.scores), maxScore: MAX_SCORE, date: state.award!.date,
+        levels: this.requiredLevels().map((l) => ({ n: l.n, short: SHORT[l.id] ?? l.title })),
+      };
+      if (!rec || JSON.stringify(rec) !== JSON.stringify(next)) saveAward(next);
+      return { id: next.id, name: next.name, score: next.score, maxScore: next.maxScore, date: next.date, page: `/award/${next.id}`, image: `/award/${next.id}.png` };
+    });
+  }
+
+  /**
+   * The levels graduation requires and the server verifies: Level 0 (seat linked to the
+   * player's address) and every scored level live on this network. Explainers (Level 8) are
+   * read in the browser only, so they are not claimed on the card.
+   */
+  private requiredLevels() {
+    return LEVELS.filter((l) => l.n === 0 || (SCORED_LEVELS.includes(l) && this.levelAvailable(l.id)));
+  }
+
+  /** Levels this world hasn't finished (empty = graduated). */
+  private unfinished(state: WorldState, key: string): string[] {
+    const out: string[] = [];
+    if (!state.world) return ["Level 0 (build your world)"];
+    if (!Object.values(state.seats).some((x) => x.wallet === key)) out.push("Level 0");
+    for (const l of SCORED_LEVELS) {
+      if (!this.levelAvailable(l.id)) continue;
+      const sc = state.scores[l.id];
+      if (!sc?.goal || !sc?.shouldFail) out.push(`Level ${l.n}`);
+    }
+    return out;
   }
 
   /** Keep stored worlds under the cap: evict the least-recently-used idle world, or refuse. */

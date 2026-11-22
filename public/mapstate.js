@@ -19,12 +19,15 @@ export function levelKind(l) {
  * Is this level complete?
  * ctx.walletDone: Level 0 finished (player claimed a seat with a wallet).
  * ctx.read: ids of explainer levels the player read to the end.
+ * When the server sends a quiz for the level (l.quiz), the level is complete only once that
+ * quiz is passed (checked on the server); an explainer with a quiz is complete by its quiz alone.
  */
 export function levelDone(l, ctx = {}) {
   const kind = levelKind(l);
-  if (kind === "onboarding") return !!ctx.walletDone;
-  if (kind === "explainer") return !!ctx.read && new Set(ctx.read).has(l.id);
-  return !!(l.score && l.score.goal && l.score.shouldFail);
+  const quizOk = !l.quiz || !!l.quiz.passed;
+  if (kind === "onboarding") return !!ctx.walletDone && quizOk;
+  if (kind === "explainer") return l.quiz ? quizOk : !!ctx.read && new Set(ctx.read).has(l.id);
+  return !!(l.score && l.score.goal && l.score.shouldFail) && quizOk;
 }
 
 /**

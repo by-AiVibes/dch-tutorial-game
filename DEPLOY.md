@@ -66,9 +66,11 @@ Plan, for later:
     host printed in the card footer. If it is unset, the share page uses the request `Host` only
     when `TRUST_PROXY=1` and the host is listed in `DCH_PUBLIC_HOSTS` (comma-separated);
     otherwise the absolute URLs and the card footer are left out.
-  - The card lists exactly the levels the server required and verified for that award: Level 0
-    plus every scored level live on the network. The Level 8 explainer is read in the browser
-    only, so it is not claimed on the card.
+  - The card lists exactly the levels the server required and verified for that award: Level 0,
+    every scored level live on the network, and the Level 8 explainer, each with its quiz passed
+    (quizzes are checked on the server, so Level 8 counts).
+- Quizzes: `POST /api/quiz/answer {world, level, q, choice}` and `POST /api/quiz/retry {world, level}`.
+  Answers never leave the server. Rate limit class `quiz`: 30/min per IP (`DCH_RL_QUIZ_MAX`).
   - `DCH_MAX_AWARDS` (default 2000) → 503 when full. Rate limits: `award` class 10/hour per IP
     (`DCH_RL_AWARD_MAX`), `awardview` 60/min per IP and 600/min server-wide.
   - CSP stays self-only: the card is a same-origin PNG; the share page has no scripts or inline

@@ -15,6 +15,7 @@ const rules = (o: Partial<Record<LimitClass, LimitRule>> = {}): Record<LimitClas
   world: { max: 2, windowMs: 10_000 },
   award: { max: 2, windowMs: 10_000 },
   awardview: { max: 3, windowMs: 1000, globalMax: 5 },
+  quiz: { max: 3, windowMs: 1000 },
   ...o,
 });
 

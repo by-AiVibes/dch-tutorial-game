@@ -19,6 +19,7 @@ const { RateLimiter, DEFAULT_RULES } = await import("../src/limits.ts");
 const { SCORED_LEVELS } = await import("../src/levels/index.ts");
 const { statePath } = await import("../src/store.ts");
 const AW = await import("../src/award.ts");
+const { QUIZZES } = await import("../src/quizzes.ts");
 
 function fakeGame() {
   const g = new Game(loadConfig({}), () => {}, { maxWorlds: 100, minIdleMs: 3_600_000, newPerHour: 100, maxAwards: 100 });
@@ -30,14 +31,30 @@ function fakeGame() {
   return { g, any };
 }
 
-/** A player world with Level 0 done and, optionally, every scored level done. */
-async function player(g: any, any: any, opts: { seat?: boolean; skip?: string } = {}) {
+/** Answer every question of a level's quiz through the server, right or wrong. */
+async function takeQuiz(g: any, a: string, id: string, right = [true, true, true]) {
+  let r: any;
+  for (const [i, ok] of right.entries()) {
+    const q = QUIZZES[id][i];
+    r = await g.answerQuiz(id, i, ok ? q.answer : (q.answer + 1) % q.choices.length, a);
+  }
+  return r;
+}
+
+/** A player world with Level 0 done and, optionally, every scored level and every quiz done. */
+async function player(g: any, any: any, opts: { seat?: boolean; skip?: string; quizzes?: boolean; skipQuiz?: string } = {}) {
   const a = Wallet.generate().address;
   await g.startWorld(a);
   if (opts.seat !== false) g.claim("issuer", "you", a, a);
   const w = any.st(a);
   for (const l of SCORED_LEVELS) if (l.id !== opts.skip) w.scores[l.id] = { goal: true, shouldFail: true };
   any.persist(w);
+  if (opts.quizzes !== false && opts.seat !== false) {
+    for (const id of Object.keys(QUIZZES)) {
+      if (id === opts.skip || id === opts.skipQuiz || !any.levelAvailable(id)) continue;
+      await takeQuiz(g, a, id);
+    }
+  }
   return a;
 }
 
@@ -63,7 +80,8 @@ test("award id: random, unguessable, stable for a world, never the address", asy
   const a = await player(g, any), b = await player(g, any);
   const r1 = await g.graduate(a, "Ann");
   assert.match(r1.id, AW.AWARD_ID_RE);
-  assert.equal(r1.score, 140);
+  assert.equal(r1.score, 410);
+  assert.equal(r1.maxScore, 410);
   const r2 = await g.graduate(a, "Ann B");
   assert.equal(r2.id, r1.id, "same world, same id (rename keeps the link)");
   assert.equal(AW.loadAward(r1.id)!.name, "Ann B");
@@ -94,8 +112,8 @@ test("PNG renders server-side at 1200x675 with the bundled font, under the size 
   await g.graduate(a, "New name");
   assert.ok(!existsSync(join(AW.awardsDir(), `${id}.png`)), "rename drops the cached image");
   const svg = AW.awardSvg(AW.loadAward(id)!);
-  for (const t of ["DCH GRADUATE", "CIRCUIT COMPLETE", "DCH CORE", "POWERED", "8/8", "SCORE 140/140", "#XRPEducationMonth", "game.example.org", "UTC", "Wallet", "Loan"]) assert.ok(svg.includes(t), t);
-  assert.ok(!svg.includes("Confidential"), "the browser-only explainer is not claimed");
+  for (const t of ["DCH GRADUATE", "CIRCUIT COMPLETE", "DCH CORE", "POWERED", "9/9", "SCORE 410/410", "#XRPEducationMonth", "game.example.org", "UTC", "Wallet", "Loan"]) assert.ok(svg.includes(t), t);
+  assert.ok(svg.includes("Confidential"), "Level 8 counts through its server-checked quiz");
   const saved = process.env.DCH_PUBLIC_URL;
   delete process.env.DCH_PUBLIC_URL;
   const bare = AW.awardSvg(AW.loadAward(id)!);
@@ -206,8 +224,8 @@ test("card lists exactly the levels the server required: a level off on this net
   const a = await player(g, any, { skip: "vault" });
   const { id } = await g.graduate(a, "Ann");
   const rec = AW.loadAward(id)!;
-  assert.deepEqual(rec.levels.map((l: any) => l.short), ["Wallet", "Token", "Freeze", "Credential", "Domain", "Batch", "Loan"]);
+  assert.deepEqual(rec.levels.map((l: any) => l.short), ["Wallet", "Token", "Freeze", "Credential", "Domain", "Batch", "Loan", "Confidential"]);
   const svg = AW.awardSvg(rec);
-  assert.ok(svg.includes("7/7") && !svg.includes("Vault") && !svg.includes("Confidential"));
-  assert.match(AW.awardHtml(rec, null), /Completed all 7 required levels/);
+  assert.ok(svg.includes("8/8") && !svg.includes("Vault"));
+  assert.match(AW.awardHtml(rec, null), /Completed all 8 required levels/);
 });

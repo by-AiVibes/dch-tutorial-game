@@ -10,6 +10,7 @@ import type { AccountKey, LevelContext } from "./levels/types.ts";
 import { award, judgeShouldFail, MAX_SCORE, total, type Part } from "./scoring.ts";
 import { botSeats, canAct, claimSeat, isRole, releaseSeat, ROLES } from "./seats.ts";
 import { CapError, QueueGate } from "./limits.ts";
+import { emptyProgress, publicQuiz, QUIZ_MAX, QUIZ_PASS, QUIZ_POINTS, QUIZZES, quizPoints, type QuizProgress } from "./quizzes.ts";
 import { awardCount, cleanName, loadAward, newAwardId, saveAward, SHORT, type AwardRecord } from "./award.ts";
 import { deleteWorld, emptyWorld, listPlayerWorlds, load, publicView, save, type RecentResult, type WorldState } from "./store.ts";
 import { cleanAddress } from "./secrets.ts";
@@ -147,6 +148,7 @@ export class Game {
       available: this.levelAvailable(l.id),
       playable: !!l.runGoal && this.levelAvailable(l.id),
       score: state.scores[l.id] ?? { goal: false, shouldFail: false },
+      quiz: this.quizView(state, l.id),
     }));
     return {
       ...publicView(state),
@@ -155,11 +157,95 @@ export class Game {
       network: this.cfg.name,
       explorer: this.cfg.explorer,
       faucetHost: this.cfg.faucetHost,
-      score: total(state.scores),
-      maxScore: MAX_SCORE,
+      score: total(state.scores) + quizPoints(state.quizzes),
+      maxScore: MAX_SCORE + QUIZ_MAX,
+      levelScore: total(state.scores),
+      levelMax: MAX_SCORE,
+      quizScore: quizPoints(state.quizzes),
+      quizMax: QUIZ_MAX,
       scoredLevels: SCORED_LEVELS.length,
       levels,
     };
+  }
+
+  /** Public quiz state for a level: questions and choices, your answers, and a "why" only for wrong ones. */
+  private quizView(state: WorldState, levelId: string) {
+    const qs = publicQuiz(levelId);
+    if (!qs) return null;
+    const p = state.quizzes?.[levelId];
+    return {
+      questions: qs,
+      answers: (p?.answers ?? []).map((a, i) => ({ choice: a.choice, correct: a.correct, ...(a.correct ? {} : { why: QUIZZES[levelId][i].why }) })),
+      passed: !!p?.passed,
+      points: p?.passed ? p.points : 0,
+      maxPoints: qs.length * QUIZ_POINTS,
+      pass: QUIZ_PASS,
+      attempts: p?.attempts ?? 0,
+      unlocked: this.quizUnlocked(state, levelId, state.owner ?? null),
+    };
+  }
+
+  /** A level's quiz opens once the level itself is done (Level 0: world + linked seat; explainers: any time in a world). */
+  private quizUnlocked(state: WorldState, levelId: string, key: string | null): boolean {
+    const l = findLevel(levelId);
+    if (!l || !QUIZZES[levelId] || !state.world || !this.levelAvailable(levelId)) return false;
+    if (l.n === 0) return Object.values(state.seats).some((x) => !!x.wallet && (key === null || x.wallet === key));
+    if (SCORED_LEVELS.includes(l)) return !!(state.scores[levelId]?.goal && state.scores[levelId]?.shouldFail);
+    return true;
+  }
+
+  /**
+   * Answer the next question of a level's quiz. Checked here, never in the browser. Questions
+   * are answered in order; after the last one the attempt passes with QUIZ_PASS correct
+   * (points = correct x QUIZ_POINTS, locked in) or fails and can be retried.
+   */
+  answerQuiz(levelId: unknown, q: unknown, choice: unknown, rawKey: unknown) {
+    const key = Game.key(rawKey);
+    const id = typeof levelId === "string" && Object.hasOwn(QUIZZES, levelId) ? levelId : null;
+    if (!id) return Promise.reject(new Error("unknown quiz"));
+    const qs = QUIZZES[id];
+    if (!Number.isInteger(q) || (q as number) < 0 || (q as number) >= qs.length) return Promise.reject(new Error("bad question number"));
+    const qi = q as number;
+    if (!Number.isInteger(choice) || (choice as number) < 0 || (choice as number) >= qs[qi].choices.length) return Promise.reject(new Error("bad choice"));
+    return this.exclusive(key, async () => {
+      const state = this.st(key);
+      if (key !== null && !state.world) throw new Error("Start your world first.");
+      if (!this.quizUnlocked(state, id, key)) throw new Error("Finish this level before its quiz.");
+      state.quizzes ??= {};
+      const p: QuizProgress = (state.quizzes[id] ??= emptyProgress());
+      if (p.passed) throw new Error("You already passed this quiz.");
+      if (p.answers.length >= qs.length) throw new Error("This attempt is over: press Try again.");
+      if (qi !== p.answers.length) throw new Error(`Answer question ${p.answers.length + 1} next.`);
+      const correct = choice === qs[qi].answer;
+      p.answers.push({ choice: choice as number, correct });
+      let done = false;
+      const right = p.answers.filter((a) => a.correct).length;
+      if (p.answers.length === qs.length) {
+        done = true;
+        if (right >= QUIZ_PASS) { p.passed = true; p.points = right * QUIZ_POINTS; }
+      }
+      this.touch(key);
+      this.persist(state);
+      return { correct, ...(correct ? {} : { why: qs[qi].why }), done, passed: p.passed, right, of: qs.length, view: this.view(key) };
+    });
+  }
+
+  /** Start a fresh attempt after a failed one (no lockout, no penalty beyond the points). */
+  retryQuiz(levelId: unknown, rawKey: unknown) {
+    const key = Game.key(rawKey);
+    const id = typeof levelId === "string" && Object.hasOwn(QUIZZES, levelId) ? levelId : null;
+    if (!id) return Promise.reject(new Error("unknown quiz"));
+    return this.exclusive(key, async () => {
+      const state = this.st(key);
+      if (key !== null && !state.world) throw new Error("Start your world first.");
+      const p = state.quizzes?.[id];
+      if (!p || p.passed) throw new Error(p?.passed ? "You already passed this quiz." : "Nothing to retry yet.");
+      p.answers = [];
+      p.attempts++;
+      this.touch(key);
+      this.persist(state);
+      return this.view(key);
+    });
   }
 
   levelAvailable(id: string): boolean {
@@ -287,7 +373,7 @@ export class Game {
         this.persist(state);
       }
       const next: AwardRecord = {
-        id: state.award!.id, network: this.cfg.name, name, score: total(state.scores), maxScore: MAX_SCORE, date: state.award!.date,
+        id: state.award!.id, network: this.cfg.name, name, score: total(state.scores) + quizPoints(state.quizzes), maxScore: MAX_SCORE + QUIZ_MAX, date: state.award!.date,
         levels: this.requiredLevels().map((l) => ({ n: l.n, short: SHORT[l.id] ?? l.title })),
       };
       if (!rec || JSON.stringify(rec) !== JSON.stringify(next)) saveAward(next);
@@ -297,11 +383,12 @@ export class Game {
 
   /**
    * The levels graduation requires and the server verifies: Level 0 (seat linked to the
-   * player's address) and every scored level live on this network. Explainers (Level 8) are
-   * read in the browser only, so they are not claimed on the card.
+   * player's address) and every scored level live on this network, plus every live level with a
+   * quiz (so the Level 8 explainer counts through its server-checked quiz). Every one of them
+   * also needs its quiz passed.
    */
   private requiredLevels() {
-    return LEVELS.filter((l) => l.n === 0 || (SCORED_LEVELS.includes(l) && this.levelAvailable(l.id)));
+    return LEVELS.filter((l) => l.n === 0 || (this.levelAvailable(l.id) && (SCORED_LEVELS.includes(l) || !!QUIZZES[l.id])));
   }
 
   /** Levels this world hasn't finished (empty = graduated). */
@@ -313,6 +400,10 @@ export class Game {
       if (!this.levelAvailable(l.id)) continue;
       const sc = state.scores[l.id];
       if (!sc?.goal || !sc?.shouldFail) out.push(`Level ${l.n}`);
+    }
+    // every required level's quiz (Level 0, scored live levels, and the Level 8 explainer)
+    for (const l of this.requiredLevels()) {
+      if (QUIZZES[l.id] && !state.quizzes?.[l.id]?.passed) out.push(`the Level ${l.n} quiz`);
     }
     return out;
   }
@@ -359,6 +450,7 @@ export class Game {
         accounts,
         seats: botSeats(),
         scores: {},
+        quizzes: {},
         memos: {},
         recent: [],
         bugs: [],

@@ -170,3 +170,8 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; } td, th { bord
   .chips { display: grid; grid-template-columns: 1fr 1fr; }
   #pointer svg { width: 28px; height: 34px; }
 }
+/* quiz gate */
+.choices { display: flex; flex-direction: column; gap: 10px; }
+.choice { text-align: left; font-size: 17px; padding: 12px 14px; min-height: 48px; }
+.choice.right { border-color: var(--ok); color: var(--ok); opacity: 1; }
+.choice.wrong { border-color: var(--bad); color: var(--bad); opacity: 1; }

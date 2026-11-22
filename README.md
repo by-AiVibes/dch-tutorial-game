@@ -19,7 +19,8 @@ npm run dch -- play issue should-fail
 npm start                           # dashboard on http://127.0.0.1:8790
 ```
 
-Other commands: `npm run dch -- amendments` (live amendment check), `npm run dch -- status`,
+Other commands: `npm run dch -- amendments` (live amendment check), `npm run dch -- play-all`
+(every playable level in order — the end-to-end smoke), `npm run dch -- status`,
 `npm test` (fast unit tests, no network), `npm run typecheck`.
 
 ### Configuration (environment)
@@ -32,6 +33,10 @@ Other commands: `npm run dch -- amendments` (live amendment check), `npm run dch
 | `PORT` / `HOST` | `8790` / `127.0.0.1` | Dashboard server. |
 | `DCH_ALLOW_HTTP_RESET` | off | Set `1` to allow the dashboard's Reset button (spends faucet requests). |
 | `DCH_DATA_DIR` | `.data` | World state. Holds throwaway test seeds: gitignored, mode 0600, never sent to the browser or printed. |
+
+**Which network?** As of Nov 21 2026 the live check shows every level's amendments enabled on
+**devnet**; on testnet, levels 6–7 show coming soon. A full devnet run scored 140/140 — see
+[docs/SMOKE.md](docs/SMOKE.md).
 
 ## How it plays
 
@@ -47,7 +52,7 @@ Other commands: `npm run dch -- amendments` (live amendment check), `npm run dch
 | 1 | Issue a token, keep rippling off | core rules | **playable** |
 | 2 | Freeze and clawback | Clawback | **playable** |
 | 3 | Issue and accept a credential | Credentials | **playable** |
-| 4 | Open a permissioned domain | PermissionedDomains | planned |
+| 4 | Open a permissioned domain | PermissionedDomains + PermissionedDEX | **playable** |
 | 5 | Batch: create plus accept | Batch (or BatchV1_1) | **playable** |
 | 6 | Deposit in a single-asset vault | SingleAssetVault | **playable** where enabled (devnet), priority |
 | 7 | Fund a loan and repay it | SingleAssetVault + LendingProtocol | **playable** where enabled (devnet), priority |
@@ -80,7 +85,7 @@ Smoke run on testnet (world 1, Nov 21 2026):
 | Holder→holder via issuer | tesSUCCESS | [D31330FD…](https://testnet.xrpl.org/transactions/D31330FD3BFB94E91B5B557C4D3A9E56A61A182638B908566EB6F526254620B0) |
 | Should-fail: route through holder | **tecPATH_DRY** | [9EF4F641…](https://testnet.xrpl.org/transactions/9EF4F641AF4FDB19369EDA3C28E67040F216063621E234042F7C726CD54F048B) |
 
-### Levels 2, 3 and 5 (testnet smoke, world 1, Nov 21 2026)
+### Levels 2–5 (testnet smoke, world 1, Nov 21 2026)
 
 - **Freeze and clawback.** Clawback has to be enabled while the issuer owns no ledger objects
   ([docs](https://xrpl.org/docs/concepts/tokens/fungible-tokens/clawing-back-tokens)), so a
@@ -102,6 +107,15 @@ Smoke run on testnet (world 1, Nov 21 2026):
   The outer Batch is still `tesSUCCESS` (it pays the fee), so the game checks the ledger to
   confirm nothing landed
   ([86984A06…](https://testnet.xrpl.org/transactions/86984A06F95A6F651ED3C50EBB92167D7727704EAEA6848E4FBA1D8275EAA224)).
+
+- **Permissioned domain.** The issuer creates a domain that accepts its `DCH-KYC` credential;
+  the credentialed holder places an offer in that domain's DEX
+  ([OfferCreate B5B61950…](https://testnet.xrpl.org/transactions/B5B6195055E18E450A870E240CC3901702001CD5DE9505038FF3BA05D8B7969E)).
+  Should-fail: the holder bot has no `DCH-KYC` credential →
+  [`tecNO_PERMISSION`](https://testnet.xrpl.org/transactions/E2F8CE8C8431284CAE4F76DDE90A8CDACF6F3F622E7D44C1542512A9E1B9F210).
+
+The dashboard also lists the world's live ledger objects (credentials, domains, vaults, loan
+brokers, loans, offers, trust lines) read with `account_objects`.
 
 Goals and should-fails score once per world; re-running a cleared part says so instead of
 sending transactions.

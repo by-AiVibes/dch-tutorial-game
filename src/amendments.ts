@@ -12,7 +12,7 @@ export type Requirement = string | string[];
 export const FEATURE_AMENDMENTS: Record<string, Requirement[]> = {
   Clawback: ["Clawback"],
   Credentials: ["Credentials"],
-  PermissionedDomains: ["PermissionedDomains"],
+  PermissionedDomains: ["PermissionedDomains", "PermissionedDEX"],
   Batch: [["Batch", "BatchV1_1"]],
   MPTokensV1: ["MPTokensV1"],
   SingleAssetVault: ["SingleAssetVault"],

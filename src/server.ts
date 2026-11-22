@@ -38,6 +38,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
   const p = url.pathname;
   if (req.method === "GET" && p === "/api/state") return send(res, 200, game.view());
+  if (req.method === "GET" && p === "/api/objects") return send(res, 200, await game.objects());
   if (req.method === "POST" && p.startsWith("/api/")) {
     const b = await body(req);
     const player = typeof b.player === "string" ? b.player : null;

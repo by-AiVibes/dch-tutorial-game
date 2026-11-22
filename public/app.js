@@ -75,6 +75,14 @@ function render() {
       el("td", {}, el("a", { href: s.explorer + r.hash, target: "_blank", rel: "noopener" }, r.hash.slice(0, 12) + "…"))))) : el("p", {}, "No transactions in this world yet."));
   $("bugs").replaceChildren(...s.bugs.map((b) => el("p", { class: "msg" }, "Flagged: " + b)));
 }
+$("objbtn").addEventListener("click", async () => {
+  $("objects").textContent = "Loading…";
+  try {
+    const o = await api("/api/objects");
+    $("objects").replaceChildren(o.objects.length ? el("table", {}, el("tr", {}, ...["Owner", "Type", "Detail", "ID"].map((h) => el("th", {}, h))),
+      o.objects.map((x) => el("tr", {}, el("td", {}, x.owner), el("td", {}, x.type), el("td", {}, x.detail), el("td", {}, x.id.slice(0, 12) + "…")))) : el("p", {}, "No objects yet."));
+  } catch (e) { $("objects").textContent = "Error: " + e.message; }
+});
 $("check").addEventListener("click", () => act(() => api("/api/amendments", {})));
 $("reset").addEventListener("click", () => act(async () => { await api("/api/reset-world", {}); lastMsg = "New world ready."; }));
 refresh().catch((e) => { document.body.prepend(el("p", { class: "msg" }, "Server not reachable: " + e.message)); });

@@ -98,6 +98,13 @@ test("store: public view never contains seeds", async () => {
 
 test("levels: interactive runners where expected", () => {
   const live = LEVELS.filter((l) => l.runGoal && l.runShouldFail).map((l) => l.id);
-  assert.deepEqual(live, ["issue", "freeze", "creds", "batch", "vault", "lend"]);
+  assert.deepEqual(live, ["issue", "freeze", "creds", "domain", "batch", "vault", "lend"]);
   assert.ok(LEVELS.find((l) => l.id === "confidential")?.explainer?.length);
+});
+
+test("dashboard summaries are short and secret-free", async () => {
+  const { summarize } = await import("../src/game.ts");
+  assert.equal(summarize({ LedgerEntryType: "Credential", CredentialType: Buffer.from("DCH-KYC").toString("hex"), Flags: 0x10000 }), "DCH-KYC accepted");
+  assert.equal(summarize({ LedgerEntryType: "Loan", PaymentRemaining: 0 }), "payments remaining 0");
+  assert.equal(summarize({ LedgerEntryType: "Offer", DomainID: "AB" }), "in domain");
 });

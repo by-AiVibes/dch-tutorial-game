@@ -4,6 +4,7 @@
 import { level1 } from "./level1.ts";
 import { level2Runners } from "./level2.ts";
 import { level3Runners } from "./level3.ts";
+import { level4Runners } from "./level4.ts";
 import { level5Runners } from "./level5.ts";
 import { level6Runners } from "./level6.ts";
 import { level7Runners } from "./level7.ts";
@@ -37,16 +38,19 @@ export const LEVELS: LevelDef[] = [
     bots: "The other seat is filled by a bot so create and accept can still complete.",
     docs: [{ title: "Credentials", href: "https://xrpl.org/docs/concepts/decentralized-storage/credentials" }],
   }, level3Runners),
-  planned({
+  live({
     id: "domain", n: 4, title: "Open a permissioned domain", feature: "PermissionedDomains",
-    goal: "Create a domain that admits only the accepted credential, then show the holder qualifies.",
-    shouldFail: "Act inside the domain from an account that lacks the required credential.",
+    goal: "The issuer creates a domain that accepts its DCH-KYC credential; the credentialed holder places an offer in that domain's DEX.",
+    shouldFail: "The holder bot, which has no DCH-KYC credential, tries to place the same offer in the domain.",
     rejectReason: "The domain admits only accounts that hold an accepted credential it lists.",
     expectedRejects: ["tecNO_PERMISSION"],
     goalRoles: ["issuer", "holder"], shouldFailRoles: ["holder", "lender", "borrower"],
     bots: "A credentialed holder bot joins cleanly. An uncredentialed bot is refused.",
-    docs: [{ title: "Permissioned domains", href: "https://xrpl.org/docs/concepts/tokens/decentralized-exchange/permissioned-domains" }],
-  }),
+    docs: [
+      { title: "Permissioned domains", href: "https://xrpl.org/docs/concepts/tokens/decentralized-exchange/permissioned-domains" },
+      { title: "Permissioned DEXes", href: "https://xrpl.org/docs/concepts/tokens/decentralized-exchange/permissioned-dexes" },
+    ],
+  }, level4Runners),
   live({
     id: "batch", n: 5, title: "Batch: create plus accept", feature: "Batch",
     goal: "Submit one all-or-nothing batch: the issuer creates a credential and the holder bot accepts it, co-signed.",

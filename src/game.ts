@@ -205,8 +205,48 @@ export class Game {
     });
   }
 
+  /**
+   * Live ledger objects owned by this world's accounts (credentials, domains, vaults, loan
+   * brokers, loans, offers, trust lines), for the dashboard. Read-only.
+   */
+  objects() {
+    return this.exclusive(async () => {
+      const client = await this.ledger();
+      const out: Array<{ owner: string; type: string; id: string; detail: string }> = [];
+      for (const [k, a] of Object.entries(this.state.accounts)) {
+        const res = await client.request({ command: "account_objects", account: a.address, ledger_index: "validated", limit: 50 });
+        for (const o of res.result.account_objects as unknown as Array<Record<string, unknown>>) {
+          out.push({ owner: k, type: String(o.LedgerEntryType), id: String(o.index), detail: summarize(o, a.address) });
+        }
+      }
+      return { network: this.cfg.name, world: this.state.world, objects: out };
+    });
+  }
+
   private record(r: RecentResult) {
     this.state.recent.unshift(r);
     this.state.recent.length = Math.min(this.state.recent.length, RECENT_MAX);
+  }
+}
+
+/** Short, secret-free description of a ledger entry for the dashboard. */
+export function summarize(o: Record<string, unknown>, owner = ""): string {
+  const hexText = (h: unknown) => (typeof h === "string" ? Buffer.from(h, "hex").toString("utf8") : "");
+  switch (o.LedgerEntryType) {
+    case "Credential": return `${hexText(o.CredentialType)} ${((o.Flags as number) & 0x10000) ? "accepted" : "not accepted"}`;
+    case "PermissionedDomain": return `${(o.AcceptedCredentials as unknown[] | undefined)?.length ?? 0} accepted credential type(s)`;
+    case "Vault": return `assets ${o.AssetsTotal ?? 0}, available ${o.AssetsAvailable ?? 0}`;
+    case "LoanBroker": return `debt ${o.DebtTotal ?? 0} / max ${o.DebtMaximum ?? "?"}, cover ${o.CoverAvailable ?? 0}`;
+    case "Loan": return `payments remaining ${o.PaymentRemaining ?? 0}`;
+    case "Offer": return `${o.DomainID ? "in domain" : "open DEX"}`;
+    case "RippleState": {
+      // Balance is stored from the low account's view; show it from the owner's view.
+      const b = o.Balance as { currency?: string; value?: string } | undefined;
+      const low = (o.LowLimit as { issuer?: string } | undefined)?.issuer;
+      const peer = low === owner ? (o.HighLimit as { issuer?: string } | undefined)?.issuer : low;
+      const v = Number(b?.value ?? 0) * (low === owner ? 1 : -1);
+      return `${b?.currency ?? ""} ${v} with ${String(peer ?? "").slice(0, 8)}…${(o.Flags as number) & 0x00400000 || (o.Flags as number) & 0x00800000 ? ", frozen" : ""}`;
+    }
+    default: return "";
   }
 }

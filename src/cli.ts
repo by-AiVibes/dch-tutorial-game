@@ -8,6 +8,7 @@ const usage = `usage:
   reset-world                 fund fresh test accounts, bots in every seat, clear scores
   amendments                  check amendments on the network (feature RPC)
   play <level> goal|should-fail [player]
+  play-all                    run every playable level's goal and should-fail in order (smoke)
   status                      print the world (no secrets)`;
 
 async function main() {
@@ -32,6 +33,18 @@ async function main() {
         const r = await game.play(level, part === "goal" ? "goal" : "shouldFail", player ?? null);
         console.log(`${r.ok ? "OK" : "NOT OK"}: ${r.message} (+${r.added}, total ${r.view.score}/${r.view.maxScore})`);
         for (const t of r.results ?? []) console.log(`  ${t.type.padEnd(11)} ${t.engineResult.padEnd(16)} ${cfg.explorer}${t.hash}`);
+        break;
+      }
+      case "play-all": {
+        const order = ["issue", "freeze", "creds", "domain", "batch", "vault", "lend"];
+        for (const id of order) {
+          for (const part of ["goal", "shouldFail"] as const) {
+            const r = await game.play(id, part, null);
+            const hashes = (r.results ?? []).map((t) => `${t.type}:${t.engineResult}:${t.hash}`).join(" ");
+            console.log(`${id} ${part}: ${r.ok ? "OK" : "NOT OK"} +${r.added} | ${r.message}${hashes ? `\n    ${hashes}` : ""}`);
+          }
+        }
+        console.log(`score ${game.view().score}/${game.view().maxScore} on ${cfg.name}`);
         break;
       }
       case "status": {

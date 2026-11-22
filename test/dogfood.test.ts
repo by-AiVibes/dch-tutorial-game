@@ -101,7 +101,7 @@ test("JobStore: random ids, joins a running slot, keeps results, expires finishe
   assert.equal("slot" in JobStore.view(a), false, "the world address never leaves the server");
   release({ ok: true, added: 10 });
   await new Promise((r) => setImmediate(r));
-  assert.deepEqual(JobStore.view(js.get(a.id)!).result, { ok: true, added: 10 });
+  assert.deepEqual(JobStore.view(js.get(a.id)!).result, { ok: true, message: undefined, added: 10, results: [] });
   const b = js.start("w|lend|goal", async () => { throw new Error("boom"); });
   assert.notEqual(b.id, a.id);
   await new Promise((r) => setImmediate(r));
@@ -144,7 +144,7 @@ test("server: {async:true} level run answers 202 with a job, GET /api/jobs/<id> 
     await new Promise((res) => setTimeout(res, 20));
     const d = await (await fetch(`${base}/api/jobs/${j.job}`)).json();
     assert.equal(d.status, "done");
-    assert.deepEqual(d.result, { ok: true, level: "lend", part: "shouldFail", added: 10, message: "done" });
+    assert.deepEqual(d.result, { ok: true, message: "done", added: 10, results: [] }, "finished jobs keep only message, points, score and tx refs");
     assert.equal((await fetch(`${base}/api/jobs/AAAAAAAAAAAAAAAAAAAAAA`)).status, 404);
     assert.equal((await post("/api/levels/nope/goal", { world: a, async: true })).status, 400);
     // without a world (shared world off over HTTP) async runs are refused like sync ones

@@ -50,7 +50,10 @@ const l0 = { msg: "", bal: null, seedShown: false };
 
 async function api(path, body) {
   let r;
-  try { r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); }
+  // A request that never answers would leave the page busy forever: give up after 90 s
+  // (starting a world takes ~30 s; long level runs are background jobs, polled in short calls).
+  const signal = AbortSignal.timeout(90_000);
+  try { r = await fetch(path, body === undefined ? { signal } : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal }); }
   catch { throw new NetError(); }
   let j = {};
   try { j = await r.json(); } catch { /* empty */ }
@@ -83,7 +86,7 @@ async function runLevel(id, part, onWait) {
       if (Date.now() - t0 > 15 * 60_000) throw new Error("Lost touch with the server. Reload the page: your score is saved there.");
     }
   }
-  if (job.status === "error") throw new Error(job.error || "That run failed.");
+  if (job.status === "error") throw new Error(job.busy ? "The server is busy. Try again in a few seconds." : job.error || "That run failed.");
   return job.result;
 }
 async function refresh() {
@@ -111,6 +114,8 @@ let lastScreen = "";
 
 function render() {
   if (!state) return;
+  // Exposed for tests and the e2e player: non-empty while a request is in flight.
+  document.body.dataset.busy = busy || "";
   const r = route();
   const s = state;
   const seat = Object.values(s.seats).find((x) => addr() && x.wallet === addr()) || Object.values(s.seats).find((x) => x.player && x.player === me());
@@ -260,7 +265,8 @@ function mapScreen() {
   }
   const map = svg("svg", { class: "circuit" + (ms.allComplete ? " complete" : ""), viewBox: `0 0 ${L.w} ${L.h}`, role: "group", "aria-label": `Level map: ${ms.doneCount} of ${ms.total} switches closed` }, g);
   const cur = ms.nodes.find((z) => z.id === ms.current);
-  const fresh = ms.doneCount === 0 && !ui.step.wallet;
+  // "Start" only for a world with no progress at all; a world waiting on quizzes says Continue.
+  const fresh = ms.doneCount === 0 && !ui.step.wallet && !state.score && !quizPending(state.levels, { walletDone: walletDone(), read: ui.read }).length;
   if (ms.allComplete && addr() && !localStorage.getItem("dch-grad-seen")) { localStorage.setItem("dch-grad-seen", "1"); setTimeout(() => go("#/graduate")); }
   const gradBtn = ms.allComplete ? el("button", { class: "primary big", "data-pt": "graduate", on: { click: () => go("#/graduate") } }, "🎓 Get your graduate card") : null;
   const startBtn = cur ? el("button", { class: "primary big", "data-pt": "start", on: { click: () => go(`#/level/${cur.id}`) } },
@@ -318,7 +324,7 @@ function levelScreen(id) {
     el("div", { class: "navrow" }, back, next),
   ];
   const target = busy ? null : c.target && c.target() ? c.target() : c.nextDisabled ? null : next;
-  return { nodes, target, hint: busy ? "Working on the ledger…" : c.target && c.target() ? c.hint : c.nextDisabled ? (c.hint || "") : isLast ? (c.nextHint || "All set. Press the button to continue.") : "Press Next →" };
+  return { nodes, target, hint: busy ? (busy === "quiz" ? "Checking your answer…" : "Working on the ledger…") : c.target && c.target() ? c.hint : c.nextDisabled ? (c.hint || "") : isLast ? (c.nextHint || "All set. Press the button to continue.") : "Press Next →" };
 }
 
 /** A level whose earlier switch is still open: say so and point at the level to play. */
@@ -431,6 +437,7 @@ function quizCards(l, firstIdx) {
         group = el("div", { class: "choices", role: "group", "data-pt": `quiz-choices-${i}`, "aria-label": `Question ${i + 1} choices` }, buttons),
         a ? el("p", { class: "result " + (a.correct ? "ok" : "bad"), role: "status" }, a.correct ? "Correct ✓" : `Not quite. Here's why: ${a.why}`) : null,
         blocked ? el("p", { class: "note" }, `Answer question ${qz.answers.length + 1} first.`) : null,
+        busy === "quiz" && !a ? el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), "Checking your answer…") : null,
         quizMsg[l.id] ? el("p", { class: "result bad", role: "alert" }, quizMsg[l.id]) : null,
         el("p", { class: "note" }, qz.passed ? `Quiz passed. First-try score: ${qz.points}/${qz.maxPoints}.`
           : qz.firstDone ? `Retry: pass with ${qz.pass} of ${n} to close the switch. Retries add no points (first try: ${qz.points}/${qz.maxPoints}).`

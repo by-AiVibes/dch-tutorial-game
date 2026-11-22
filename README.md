@@ -213,6 +213,7 @@ npm run e2e -- --url https://game.dch.everhostx.com --runs 3     # 3 runs in a r
 npm run e2e -- --url https://game.dch.everhostx.com --level 7    # only Level 7 (earlier levels played first if needed)
 npm run e2e -- --url https://game.dch.everhostx.com --fresh      # new wallet + world (counts toward 3 per hour)
 npm run e2e -- --url https://game.dch.everhostx.com --wrong freeze --headed   # miss one quiz answer, watch it
+npm run e2e -- --url https://game.dch.everhostx.com --latency 800      # add 0.8 s to every API call (slow phone network)
 ```
 
 Output in `./e2e-out/`: `report.md` (short and plain: the result, the fails, one line per level;

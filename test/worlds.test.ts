@@ -49,8 +49,10 @@ test("isolation: player B sees a fresh circuit after player A completes levels",
   const wa = any.st(A);
   for (const l of g.view(A).levels) if (l.goalRoles.length) wa.scores[l.id] = { goal: true, shouldFail: true };
   any.persist(wa);
+  const { QUIZZES } = await import("../src/quizzes.ts");
+  for (const [i, q] of QUIZZES.issue.entries()) await g.answerQuiz("issue", i, q.answer, A); // a switch closes once its quiz passes
   const va = g.view(A), vb = g.view(B);
-  assert.equal(va.score, 140);
+  assert.equal(va.levelScore, 140);
   assert.equal(vb.score, 0);
   assert.ok(vb.levels.every((l: any) => !l.score.goal && !l.score.shouldFail));
   assert.equal(done(vb).doneCount, 0, "B's circuit is fresh");
@@ -61,7 +63,7 @@ test("isolation: player B sees a fresh circuit after player A completes levels",
   assert.equal(g.view(null).score, 0, "shared world untouched");
   // A's world survives a restart; B is still fresh.
   const { g: g2 } = fakeGame();
-  assert.equal(g2.view(A).score, 140);
+  assert.equal(g2.view(A).levelScore, 140);
   assert.equal(g2.view(B).score, 0);
 });
 

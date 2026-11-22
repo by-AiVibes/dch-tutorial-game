@@ -4,6 +4,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync, readdirSync, statSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR } from "./config.ts";
+import type { QuizProgress } from "./quizzes.ts";
 import type { AmendmentReport } from "./amendments.ts";
 import type { TxResult } from "./ledger.ts";
 import type { Scoreboard } from "./scoring.ts";
@@ -37,6 +38,8 @@ export interface WorldState {
   owner?: string | null;
   /** Graduation award for this world: a random id (the share link) and the UTC completion date. */
   award?: { id: string; date: string } | null;
+  /** Quiz progress per level id. Absent in worlds from before quizzes: those players take them. */
+  quizzes?: Record<string, QuizProgress>;
 }
 
 export function emptyWorld(network: string): WorldState {

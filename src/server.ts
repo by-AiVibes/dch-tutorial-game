@@ -135,6 +135,8 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
     const sharedOff = () => send(res, 403, { error: "This server runs one world per player: start your world in Level 0." });
     if (p === "/api/seat/claim") return sharedOk ? send(res, 200, game.claim(String(b.role), String(b.player), b.wallet == null || b.wallet === "" ? null : cleanAddress(b.wallet), key)) : sharedOff();
     if (p === "/api/seat/release") return sharedOk ? send(res, 200, game.release(String(b.role), String(b.player), key)) : sharedOff();
+    if (p === "/api/quiz/answer") return sharedOk ? send(res, 200, await game.answerQuiz(b.level, b.q, b.choice, key)) : sharedOff();
+    if (p === "/api/quiz/retry") return sharedOk ? send(res, 200, await game.retryQuiz(b.level, key)) : sharedOff();
     if (p === "/api/amendments") return send(res, 200, await game.refreshAmendments());
     if (p === "/api/reset-world") {
       if (!ALLOW_HTTP_RESET) return send(res, 403, { error: "Run `npm run dch -- reset-world`, or start the server with DCH_ALLOW_HTTP_RESET=1." });

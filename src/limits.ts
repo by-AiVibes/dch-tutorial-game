@@ -11,7 +11,7 @@ export interface LimitRule {
   globalMax?: number;
 }
 
-export type LimitClass = "read" | "account" | "heavy" | "reset" | "world" | "award" | "awardview";
+export type LimitClass = "read" | "account" | "heavy" | "reset" | "world" | "award" | "awardview" | "quiz";
 
 /** Defaults; override with DCH_RL_<CLASS>_MAX / DCH_RL_<CLASS>_WINDOW_MS (e.g. for a workshop behind one NAT). */
 export const DEFAULT_RULES: Record<LimitClass, LimitRule> = {
@@ -24,6 +24,7 @@ export const DEFAULT_RULES: Record<LimitClass, LimitRule> = {
   world: { max: 3, windowMs: 3_600_000 },
   award: { max: 10, windowMs: 3_600_000 }, // POST /api/award: create or rename your card
   awardview: { max: 60, windowMs: 60_000, globalMax: 600 }, // /award/<id> page + PNG (link previews fetch these)
+  quiz: { max: 30, windowMs: 60_000 }, // POST /api/quiz/answer and /api/quiz/retry
 };
 
 export function rulesFromEnv(env: NodeJS.ProcessEnv = process.env): Record<LimitClass, LimitRule> {
@@ -42,6 +43,7 @@ export function classify(_method: string, path: string): LimitClass {
   if (path === "/api/reset-world") return "reset";
   if (path === "/api/world/start") return "world";
   if (path === "/api/award") return "award";
+  if (path.startsWith("/api/quiz/")) return "quiz";
   if (path.startsWith("/award/")) return "awardview";
   if (path.startsWith("/api/account/")) return "account";
   if (path === "/api/objects" || path === "/api/amendments" || path.startsWith("/api/levels/")) return "heavy";

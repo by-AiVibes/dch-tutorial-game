@@ -1,6 +1,6 @@
 // Test-only helpers for e2e/play.mjs. The answer key lives here, outside public/, so it is
 // never served to the browser; test/e2e.test.ts checks it still matches src/quizzes.ts.
-import { featureEnabled, parseFeatures } from "../src/amendments.ts";
+import { featureEnabled, parseFeatures } from "./amendments.mjs";
 /** Answer key: level id -> [question, right answer text]. Kept in sync by test/e2e.test.ts. */
 export const ANSWER_KEY = {
   wallet: [

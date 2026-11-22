@@ -65,3 +65,18 @@ test("e2e: asks the network itself, trying the next endpoint when one fails", as
   assert.equal(r.amendments.Clawback.enabled, true);
   assert.equal(await E.networkAmendments("mainnet", fake), null, "no mainnet endpoints, ever");
 });
+
+test("e2e/amendments.mjs is a faithful plain-JS copy of src/amendments.ts", async () => {
+  const src = await import("../src/amendments.ts");
+  const copy: any = await import("../e2e/amendments.mjs" as string);
+  assert.deepEqual(copy.FEATURE_AMENDMENTS, src.FEATURE_AMENDMENTS);
+  const features = { A: { name: "MPTokensV1", enabled: true }, B: { name: "SingleAssetVault", enabled: true }, C: { name: "LendingProtocol", enabled: false, supported: true }, D: { name: "BatchV1_1", enabled: true }, E: {} };
+  assert.deepEqual(copy.parseFeatures(features), src.parseFeatures(features as any));
+  const report = { checkedAt: "", network: "devnet", amendments: src.parseFeatures(features as any) };
+  for (const f of [...Object.keys(src.FEATURE_AMENDMENTS), "Unknown"]) assert.equal(copy.featureEnabled(report, f), src.featureEnabled(report, f), f);
+  assert.equal(copy.featureEnabled(null, "Batch"), false);
+  // and the e2e never imports TypeScript (it must run on Node < 22.18)
+  for (const f of readdirSync(new URL("../e2e/", import.meta.url))) {
+    assert.doesNotMatch(readFileSync(new URL(`../e2e/${f}`, import.meta.url), "utf8"), /from "[^"]+\.ts"/, `${f} imports TypeScript`);
+  }
+});

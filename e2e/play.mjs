@@ -3,8 +3,9 @@
 //
 //   npm run e2e -- --url https://game.dch.everhostx.com
 //
-// Playwright headless Chromium at iPhone size (375x667, Mobile Safari user agent), Node 22+,
-// macOS or Linux. Test networks only: it reads /api/state first and stops unless the server
+// Playwright headless Chromium at iPhone size (375x667, Mobile Safari user agent), macOS or
+// Linux, Node 20+ (plain JS, no TypeScript imports: the server's 22.18 isn't needed here).
+// Test networks only: it reads /api/state first and stops unless the server
 // says devnet or testnet. It never opens a wallet app; the game page makes a throwaway test
 // wallet in the browser, and only that wallet's ADDRESS is kept (in ./.e2e-player.json) so later
 // runs reuse the same world (the server allows 3 new worlds per hour per IP). No seed is stored.
@@ -45,8 +46,9 @@ if (!Number.isInteger(RUNS) || RUNS < 1 || RUNS > 20 || (ONLY !== null && !(Numb
   console.error("Usage: npm run e2e -- --url <game url> [--runs 1-20] [--level 0-8] [--fresh] [--wrong <levelId>]");
   process.exit(2);
 }
-const [major, minor] = process.versions.node.split(".").map(Number);
-if (major < 22 || (major === 22 && minor < 18)) { console.error(`Node 22.18 or newer is needed (this is ${process.versions.node}).`); process.exit(2); }
+// The e2e is plain JS (no TypeScript imports), so any Node that Playwright supports works.
+const [major] = process.versions.node.split(".").map(Number);
+if (major < 20) { console.error(`Node 20 or newer is needed for the e2e (this is ${process.versions.node}).`); process.exit(2); }
 
 let chromium;
 try { ({ chromium } = await import("playwright")); }
@@ -236,7 +238,7 @@ async function playOnce(run) {
       r.status = v.status; r.skipped = !v.fail;
       if (v.fail) {
         r.errors.push(v.status);
-        steps.push({ run, level: l.id, step: "coming soon", action: "skip check", result: "FAIL", ms: 0, score: "", screenError: v.status, api: [], consoleErrors: [], shot: "", likelyCode: "src/amendments.ts featureEnabled(); src/game.ts levelAvailable() / refreshAmendments()" });
+        steps.push({ run, level: l.id, step: "coming soon", action: "skip check", result: "FAIL", ms: 0, score: "", screenError: v.status, api: [], consoleErrors: [], shot: "", likelyCode: "src/amendments.ts featureEnabled() (copy: e2e/amendments.mjs); src/game.ts levelAvailable() / refreshAmendments()" });
       }
       continue;
     }

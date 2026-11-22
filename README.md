@@ -198,7 +198,7 @@ devnet or testnet only (it checks the server first and stops otherwise), no wall
 Level 0 through the graduate card, answers the quizzes from a test-only answer key
 (`e2e/lib.mjs`, never sent to the browser), and prints PASS/FAIL per level.
 
-Mac, one line (Node 22.18 or newer; get it from nodejs.org or `brew install node@22`):
+Mac, one line (Node 20 or newer, e.g. 22.14 is fine; the e2e is plain JS. Running the server itself needs 22.18+):
 
 ```sh
 git clone https://github.com/by-AiVibes/dch-tutorial-game.git && cd dch-tutorial-game && npm ci && npx playwright install chromium && npm run e2e -- --url https://game.dch.everhostx.com

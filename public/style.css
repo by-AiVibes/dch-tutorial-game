@@ -1,0 +1,24 @@
+:root { --bg:#0f1115; --card:#181b22; --line:#2a2f3a; --fg:#e7e9ee; --mut:#9aa3b2; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --acc:#58a6ff; }
+* { box-sizing: border-box; }
+body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+header, main, footer { max-width: 980px; margin: 0 auto; padding: 16px; }
+h1 { margin: 0; } .sub { color: var(--mut); margin: 4px 0 12px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+h2 { margin: 0 0 8px; font-size: 18px; }
+a { color: var(--acc); }
+button { background: #222837; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--acc); } button:disabled { opacity: .45; cursor: default; }
+input { background:#0b0d11; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
+.stats { display:flex; gap:10px; flex-wrap:wrap; }
+.stat { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 12px; }
+.stat b { display:block; font-size:18px; }
+.seats, .levels { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:8px; margin-top:8px; }
+.seat, .lvl { border:1px solid var(--line); border-radius:8px; padding:8px; }
+.lvl { cursor:pointer; } .lvl.sel { border-color: var(--acc); }
+.tag { display:inline-block; font-size:12px; padding:1px 6px; border-radius:10px; border:1px solid var(--line); color:var(--mut); margin-right:4px; }
+.tag.ok { color: var(--ok); border-color: var(--ok); } .tag.warn { color: var(--warn); border-color: var(--warn); } .tag.pri { color: var(--acc); border-color: var(--acc); }
+table { width:100%; border-collapse:collapse; font-size:13px; } td, th { border-bottom:1px solid var(--line); padding:4px 6px; text-align:left; }
+.res-tes { color: var(--ok); } .res-bad { color: var(--warn); }
+.msg { padding:8px; border-radius:6px; background:#11151c; border-left:3px solid var(--acc); margin-top:8px; white-space:pre-wrap; }
+code { background:#0b0d11; padding:1px 4px; border-radius:4px; }
+footer { color: var(--mut); font-size: 13px; }

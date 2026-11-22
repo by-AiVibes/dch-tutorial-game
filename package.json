@@ -1,0 +1,32 @@
+{
+  "name": "dch-tutorial-game",
+  "version": "0.1.0",
+  "description": "DCH Tutorial Game: learn the XRP Ledger by playing levels on testnet/devnet.",
+  "scripts": {
+    "dch": "node src/cli.ts",
+    "start": "node src/server.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/by-AiVibes/dch-tutorial-game.git"
+  },
+  "license": "UNLICENSED",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/by-AiVibes/dch-tutorial-game/issues"
+  },
+  "homepage": "https://github.com/by-AiVibes/dch-tutorial-game#readme",
+  "dependencies": {
+    "xrpl": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22.18"
+  }
+}

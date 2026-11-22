@@ -90,3 +90,27 @@ export function tracePath(a, b) {
   const mid = (a.y + b.y) / 2;
   return `M${a.x} ${a.y} V${mid} H${b.x} V${b.y}`;
 }
+
+/**
+ * Ring layout: level switches on a circle around a central chip, Level 0 at the top, going
+ * clockwise. Returns { w, h, cx, cy, r, pos(i) -> {x, y, a}, label(i) -> {x, y, anchor},
+ * badge(i) -> {x, y} } (badge = the level-number tag on the pad's outer edge).
+ */
+export function ringLayout(count, size = 440) {
+  const cx = size / 2, cy = size / 2, r = size * 0.245;
+  const ang = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / count;
+  const pos = (i) => ({ x: cx + r * Math.cos(ang(i)), y: cy + r * Math.sin(ang(i)), a: ang(i) });
+  const label = (i) => {
+    const c = Math.cos(ang(i)), s = Math.sin(ang(i));
+    const lr = r + size * 0.1;
+    return { x: cx + lr * c, y: cy + lr * s + 5, anchor: c > 0.3 ? "start" : c < -0.3 ? "end" : "middle" };
+  };
+  const badge = (i) => ({ x: cx + (r + 24) * Math.cos(ang(i)), y: cy + (r + 24) * Math.sin(ang(i)) });
+  return { w: size, h: size, cx, cy, r, pos, label, badge };
+}
+
+/** SVG arc along the ring from node i to node j (clockwise). */
+export function ringArc(L, i, j) {
+  const a = L.pos(i), b = L.pos(j);
+  return `M${a.x.toFixed(1)} ${a.y.toFixed(1)} A${L.r} ${L.r} 0 0 1 ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+}

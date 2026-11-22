@@ -86,11 +86,43 @@ test("map: unsorted input is ordered by level number; layout and traces are well
 
 test("browser UI code never stores or sends a seed", async () => {
   const { readFileSync } = await import("node:fs");
-  for (const f of ["app.js", "level0.js", "mapstate.js"]) {
+  for (const f of ["app.js", "level0.js", "mapstate.js", "diagrams.js"]) {
     const src = readFileSync(new URL(`../public/${f}`, import.meta.url), "utf8");
     assert.ok(!/localStorage\.setItem\([^)]*seed/i.test(src), `${f}: seed must not be stored`);
     for (const m of src.matchAll(/JSON\.stringify\(([^)]*)\)/g)) assert.ok(!/seed/i.test(m[1]), `${f}: request body ${m[1]}`);
     assert.ok(!/console\.\w+\([^)]*seed/i.test(src), `${f}: seed must not be logged`);
     assert.ok(!/https?:\/\/(?!xrpl\.org|\$\{|www\.w3\.org\/2000\/svg)/.test(src), `${f}: no external hosts besides the faucet`);
+  }
+});
+
+test("ring map: switches sit on a circle around the core, inside the board, labels outside the ring", () => {
+  const L = M.ringLayout(9);
+  const d = (p: any) => Math.hypot(p.x - L.cx, p.y - L.cy);
+  for (let i = 0; i < 9; i++) {
+    const p = L.pos(i), lab = L.label(i);
+    assert.ok(Math.abs(d(p) - L.r) < 1e-6, "on the ring");
+    assert.ok(p.x > 30 && p.x < L.w - 30 && p.y > 30 && p.y < L.h - 30, "inside the board");
+    assert.ok(d(lab) > L.r + 20, "label outside the ring");
+    assert.ok(["start", "end", "middle"].includes(lab.anchor));
+  }
+  assert.ok(Math.abs(L.pos(0).x - L.cx) < 1e-6 && L.pos(0).y < L.cy, "Level 0 at the top");
+  assert.ok(L.pos(2).x > L.cx, "clockwise");
+  assert.match(M.ringArc(L, 0, 1), /^M[\d.]+ [\d.]+ A[\d.]+ [\d.]+ 0 0 1 [\d.]+ [\d.]+$/);
+});
+
+test("teaching diagrams: every scored level has goal + should-fail diagrams; captions stay short", async () => {
+  const D: any = await import("../public/diagrams.js" as string);
+  for (const id of ["issue", "freeze", "creds", "domain", "batch", "vault", "lend"]) {
+    assert.ok(D.DIAG[`${id}:goal`], `${id}:goal`);
+    const f = D.DIAG[`${id}:fail`];
+    assert.ok(f && Number.isInteger(f.bad), `${id}:fail marks the refused link`);
+  }
+  for (const k of ["wallet:devnet", "wallet:wallet", "wallet:seed", "wallet:fund", "wallet:world", "wallet:seat", "seat", "done"]) assert.ok(D.DIAG[k], k);
+  for (const [k, d] of Object.entries<any>(D.DIAG)) {
+    assert.ok(d.caption.length >= 1 && d.caption.length <= 2, `${k}: 1-2 caption lines`);
+    for (const line of d.caption) assert.ok(line.length <= 64, `${k}: caption too long: ${line}`);
+    assert.ok(d.nodes.length >= 2 && d.nodes.length <= 3, `${k}: 2-3 nodes`);
+    for (const nd of d.nodes) assert.ok(D.ICONS[nd.icon], `${k}: icon ${nd.icon}`);
+    if (d.bad !== undefined) assert.ok(d.bad < d.nodes.length - 1, `${k}: bad link index`);
   }
 });

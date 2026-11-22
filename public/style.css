@@ -28,36 +28,69 @@ footer { color: var(--mut); font-size: 13px; text-align: center; padding: 10px; 
 .maphead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 6px 0 8px; }
 .maphead h1 { font-size: 22px; margin: 0; }
 .maphead p { margin: 0; color: var(--mut); }
-.circuit { width: 100%; height: auto; display: block; max-height: calc(100vh - 210px); }
-.trace { fill: none; stroke: #2c3442; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
-.trace.lit { stroke: var(--glow); filter: drop-shadow(0 0 4px rgba(255, 211, 77, .7)); }
-.flow { fill: none; stroke: #fff6c9; stroke-width: 2; stroke-dasharray: 6 14; opacity: .8; animation: flow 1.2s linear infinite; }
+.circuit { width: 100%; height: auto; display: block; max-height: calc(100vh - 190px); margin: 0 auto; }
+.board { fill: #0d4a32; stroke: #c8a052; stroke-width: 3; }
+.board-grid { pointer-events: none; }
+.via { fill: #1d6b4a; }
+.mount { fill: #0a3826; stroke: #c8a052; stroke-width: 3; }
+.trace, .spoke { fill: none; stroke: #2f7d58; stroke-linecap: round; stroke-linejoin: round; }
+.trace { stroke-width: 9; }
+.spoke { stroke-width: 4; stroke-dasharray: 2 6; }
+.trace.lit, .spoke.lit { stroke: var(--glow); filter: drop-shadow(0 0 5px rgba(255, 211, 77, .75)); }
+.spoke.lit { stroke-dasharray: none; stroke-width: 4; }
+.flow { fill: none; stroke: #fff6c9; stroke-width: 2.5; stroke-dasharray: 6 14; opacity: .85; animation: flow 1.2s linear infinite; }
 @keyframes flow { to { stroke-dashoffset: -20; } }
+.core .pin { fill: #c8a052; }
+.core .chip { fill: #15181e; stroke: #3a4352; stroke-width: 2; }
+.core .chipdot { fill: #3a4352; }
+.core text { text-anchor: middle; font-family: ui-monospace, monospace; }
+.core .chiplabel { fill: #9aa3b2; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+.core .chipcount { fill: var(--fg); font-size: 24px; font-weight: 800; }
+.core .chipsub { fill: #6b7482; font-size: 11px; }
+.core.on .chip { fill: #2b2510; stroke: var(--glow); stroke-width: 3; filter: drop-shadow(0 0 14px var(--glow)); }
+.core.on .chipdot { fill: #3fb950; }
+.core.on .chiplabel, .core.on .chipsub { fill: var(--glow); }
+.corehalo { animation: halo 2s ease-in-out infinite; }
+@keyframes halo { 50% { opacity: .55; } }
 .node { cursor: pointer; }
 .node.locked { cursor: not-allowed; }
-.node.locked .pad, .node.soon .pad { stroke: #262b35; fill: #14171d; }
-.node.locked text, .node.soon text { fill: #4d5562; }
-.node.locked .contact, .node.soon .contact { fill: #3a414d; }
-.node.locked .lever, .node.soon .lever { stroke: #3d4450; }
-.node.soon .pad { stroke-dasharray: 6 5; }
-.node .pad { fill: #1b202a; stroke: #3a4352; stroke-width: 2; }
-.node.done .pad { stroke: var(--glow); }
-.node.current .pad { stroke: var(--acc); stroke-width: 3; }
-.node .contact { fill: #8b95a6; }
-.node.done .contact { fill: var(--glow); }
-.node .lever { stroke: #c9d1dc; stroke-width: 5; stroke-linecap: round; transition: transform .4s; }
-.node.done .lever { stroke: var(--glow); }
-.node text { fill: var(--fg); font: 600 15px system-ui, sans-serif; text-anchor: middle; }
-.node text.num { fill: var(--mut); font-size: 12px; }
+.node .pad { fill: #b88a3a; stroke: #e2c27a; stroke-width: 3; }
+.node .contact { fill: #2a2f3a; }
+.node .lever { stroke: #f2f4f7; stroke-width: 4.5; stroke-linecap: round; }
+.node .lab { fill: #e7f5ec; font: 700 13px system-ui, sans-serif; paint-order: stroke; stroke: #0d4a32; stroke-width: 4px; }
+.node.done .pad { fill: var(--glow); stroke: #fff6c9; filter: drop-shadow(0 0 8px rgba(255, 211, 77, .9)); }
+.node.done .lever { stroke: #2a2110; }
+.node.current .pad { stroke: var(--acc); stroke-width: 4; }
+.node.locked .pad, .node.soon .pad { fill: #4a4434; stroke: #6b6247; }
+.node.locked .lever, .node.soon .lever { stroke: #8a8f99; }
+.node.locked .lab, .node.soon .lab { fill: #7fa592; }
+.node.soon .pad { stroke-dasharray: 5 4; }
 .node .ring { fill: none; stroke: var(--acc); stroke-width: 3; opacity: 0; }
 .node.current .ring { animation: ring 1.4s ease-out infinite; }
-@keyframes ring { 0% { opacity: .9; r: 46; } 100% { opacity: 0; r: 70; } }
-.node .partial { fill: var(--warn); }
-.power circle { fill: #1b202a; stroke: var(--glow); stroke-width: 3; }
-.power text, .lamp text { fill: var(--glow); font: 800 18px system-ui; text-anchor: middle; }
-.lamp circle { fill: #1b202a; stroke: #3a4352; stroke-width: 3; }
-.circuit.complete .lamp circle { fill: var(--glow); stroke: #fff6c9; filter: drop-shadow(0 0 14px var(--glow)); }
-.circuit.complete .lamp text { fill: #06101f; }
+@keyframes ring { 0% { opacity: .9; r: 28; } 100% { opacity: 0; r: 44; } }
+.node .tag { fill: #15181e; stroke: #c8a052; stroke-width: 1.5; }
+.node .tagnum { fill: #e2c27a; font: 800 10px ui-monospace, monospace; }
+.node.done .tag { stroke: var(--glow); }
+.node.done .tagnum { fill: var(--glow); }
+.node .partial { fill: var(--warn); stroke: #0d4a32; stroke-width: 2; }
+.node.target { box-shadow: none; animation: none; }
+.node.target .pad { stroke: var(--glow); stroke-width: 5; }
+
+/* teaching diagrams */
+.diag { margin: 0; background: #0f2a1f; border: 1px solid #1f5a40; border-radius: 12px; padding: 8px 8px 6px; }
+.diag-svg { width: 100%; height: auto; display: block; max-height: 110px; }
+.diag .dnode { fill: #133a2a; stroke: #7ee2a8; stroke-width: 2; }
+.diag .dnode.ok { stroke: var(--ok); fill: #12351f; }
+.diag .dicon { fill: none; stroke: #d7f5e3; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.diag .dl { stroke: #7ee2a8; stroke-width: 2; }
+.diag .dl.bad { stroke: var(--bad); stroke-dasharray: 5 4; }
+.diag text { text-anchor: middle; font-family: system-ui, sans-serif; }
+.diag .dlab { fill: #a9dcbf; font-size: 10.5px; }
+.diag .dlab.bad { fill: #ff9a93; }
+.diag .dname { fill: #e7f5ec; font-size: 11.5px; font-weight: 600; }
+.diag .dx { fill: var(--bad); font-size: 16px; font-weight: 800; }
+.diag figcaption { display: flex; flex-direction: column; gap: 1px; color: #bfe6cf; font-size: 14px; text-align: center; }
+
 .banner { text-align: center; padding: 10px; border-radius: 12px; border: 2px solid var(--glow); color: var(--glow); font-weight: 800; margin: 6px 0; }
 
 /* step cards */
@@ -110,10 +143,9 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; } td, th { bord
 .node.target .pad { stroke: var(--glow); stroke-width: 4; }
 
 @media (prefers-reduced-motion: reduce) {
-  #pointer, .target, .flow, .node.current .ring, .spinner { animation: none !important; }
-  .node.current .ring { opacity: .8; r: 52; }
+  #pointer, .target, .flow, .node.current .ring, .spinner, .corehalo { animation: none !important; }
+  .node.current .ring { opacity: .8; r: 32; }
   .flow { display: none; }
-  .node .lever { transition: none; }
 }
 @media (max-width: 520px) {
   .bar { padding: 6px 8px; gap: 6px; }
@@ -127,4 +159,7 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; } td, th { bord
   .card .lead { font-size: 17px; }
   .circuit { max-height: none; }
   button.big { flex: 1; min-width: 0; }
+  .card .act { flex-direction: column; align-items: stretch; }
+  .chips { display: grid; grid-template-columns: 1fr 1fr; }
+  #pointer svg { width: 28px; height: 34px; }
 }

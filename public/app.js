@@ -73,6 +73,7 @@ function route() {
   const h = location.hash.replace(/^#\/?/, "");
   if (h.startsWith("level/")) return { name: "level", id: decodeURIComponent(h.slice(6)) };
   if (h === "tools") return { name: "tools" };
+  if (h === "graduate") return { name: "graduate" };
   return { name: "map" };
 }
 const go = (hash) => { if (location.hash === hash) render(); else location.hash = hash; };
@@ -93,7 +94,7 @@ function render() {
   if (r.name === "tools") $("nav-tools").setAttribute("aria-current", "page");
 
   const screenKey = r.name + (r.id || "");
-  const out = r.name === "level" ? levelScreen(r.id) : r.name === "tools" ? toolsScreen() : mapScreen();
+  const out = r.name === "level" ? levelScreen(r.id) : r.name === "tools" ? toolsScreen() : r.name === "graduate" ? graduateScreen() : mapScreen();
   if (!out) return;
   $("screen").replaceChildren(...out.nodes.filter(Boolean));
   if (screenKey !== lastScreen) { lastScreen = screenKey; window.scrollTo(0, 0); }
@@ -215,19 +216,21 @@ function mapScreen() {
   const map = svg("svg", { class: "circuit" + (ms.allComplete ? " complete" : ""), viewBox: `0 0 ${L.w} ${L.h}`, role: "group", "aria-label": `Level map: ${ms.doneCount} of ${ms.total} switches closed` }, g);
   const cur = ms.nodes.find((z) => z.id === ms.current);
   const fresh = ms.doneCount === 0 && !ui.step.wallet;
+  if (ms.allComplete && addr() && !localStorage.getItem("dch-grad-seen")) { localStorage.setItem("dch-grad-seen", "1"); setTimeout(() => go("#/graduate")); }
+  const gradBtn = ms.allComplete ? el("button", { class: "primary big", "data-pt": "graduate", on: { click: () => go("#/graduate") } }, "🎓 Get your graduate card") : null;
   const startBtn = cur ? el("button", { class: "primary big", "data-pt": "start", on: { click: () => go(`#/level/${cur.id}`) } },
     fresh ? "Start" : `Continue: Level ${cur.n} · ${cur.short}`) : null;
   const nodes = [
     el("div", { class: "maphead" },
       el("div", {}, el("h1", {}, "Your circuit"), el("p", {}, ms.allComplete ? "All switches closed. The core is powered." : `${ms.doneCount} of ${ms.total} switches closed. Close them all to power the core.`)),
-      startBtn),
+      startBtn || gradBtn),
     ms.allComplete ? el("div", { class: "banner", role: "status" }, "Circuit complete! The core is powered. Tap any switch to replay it.") : null,
     map,
   ];
   return {
     nodes,
-    target: startBtn,
-    hint: ms.allComplete ? "" : fresh ? "Start here: press Start." : `Next: Level ${cur.n} (${cur.short}). Press Continue.`,
+    target: startBtn || gradBtn,
+    hint: ms.allComplete ? "You graduated! Get your card." : fresh ? "Start here: press Start." : `Next: Level ${cur.n} (${cur.short}). Press Continue.`,
   };
 }
 
@@ -495,6 +498,45 @@ function toolsScreen() {
       } } }, "Restart my world") : null),
   ];
   return { nodes, target: null, hint: "" };
+}
+
+// ---- graduation: a shareable award card, verified and rendered on the server ----
+const grad = { msg: "", card: null };
+function graduateScreen() {
+  const ms = mapState(state.levels, { walletDone: walletDone(), read: ui.read });
+  if (!ms.allComplete || !addr()) {
+    const b = el("button", { class: "primary big", "data-pt": "to-map", on: { click: () => go("#/map") } }, "Back to the map");
+    return { nodes: [el("div", { class: "card" }, el("h2", {}, "Not graduated yet"), el("p", { class: "lead" }, `Close all ${ms.total} switches to get your graduate card. ${ms.doneCount} of ${ms.total} done.`), el("div", { class: "act" }, b))], target: b, hint: "Finish every level first." };
+  }
+  const id = grad.card?.id || state.award?.id || null;
+  const name = el("input", { id: "grad-name", type: "text", maxlength: "32", autocomplete: "nickname", placeholder: "Your name or @handle", value: localStorage.getItem("dch-award-name") || "", "aria-label": "Name on your card" });
+  const make = el("button", { class: id ? "big" : "primary big", "data-pt": "make-card", ...(busy ? { disabled: true } : {}), on: { click: () => act("award", async () => {
+    try {
+      const n = name.value.trim();
+      localStorage.setItem("dch-award-name", n);
+      grad.card = await api("/api/award", { world: addr(), name: n });
+      grad.msg = "";
+    } catch (e) { grad.msg = e.message; }
+  }) } }, id ? "Update name" : "Make my card");
+  const nodes = [el("div", { class: "card grad" },
+    el("h2", {}, "🎓 DCH Graduate"),
+    el("p", { class: "lead" }, "You powered the full circuit. Put your name on your card and share it."),
+    el("label", { for: "grad-name", class: "lab" }, "Name on your card (up to 32 characters)"),
+    el("div", { class: "act" }, name, make),
+    grad.msg ? el("p", { class: "result bad", role: "alert" }, grad.msg) : null)];
+  let share = null;
+  if (id) {
+    const page = `${location.origin}/award/${id}`;
+    const v = encodeURIComponent(grad.card?.name || localStorage.getItem("dch-award-name") || "");
+    const score = grad.card?.score ?? state.score;
+    const text = `I completed the DCH Tutorial and powered the full circuit ⚡ Score: ${score}/${state.maxScore}. Learn XRPL dev hands-on on devnet 👇 ${page} @XRPLF #XRPEducationMonth`;
+    share = el("a", { class: "btn primary big", "data-pt": "share-x", href: "https://x.com/intent/post?text=" + encodeURIComponent(text), target: "_blank", rel: "noopener" }, "Share on X");
+    nodes.push(el("div", { class: "card grad" },
+      el("img", { class: "award-img", src: `/award/${id}.png?v=${v}`, width: "1200", height: "675", alt: "Your DCH Graduate card: the fully lit circuit with the DCH core powered" }),
+      el("div", { class: "act" }, share, el("a", { class: "btn big", href: `/award/${id}.png`, download: "dch-graduate.png" }, "Download image")),
+      el("p", { class: "small" }, "Share opens X with the text filled in. Nothing is posted until you press Post. Your link: ", link(page, page))));
+  }
+  return { nodes, target: share || make, hint: share ? "Press Share on X, or download the image." : "Enter your name, then press Make my card." };
 }
 
 $("home").addEventListener("click", () => go("#/map"));

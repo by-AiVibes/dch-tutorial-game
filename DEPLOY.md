@@ -54,6 +54,19 @@ Plan, for later:
   - Faucet: every world costs 6 faucet requests from the server's IP (plus extra accounts some
     levels add, e.g. Level 2's clawback issuer). Public faucets rate-limit per IP, so a burst of
     new players can see "faucet failed, try again in a minute".
+- Graduation award: `POST /api/award {world, name}` checks on the server that the player's own
+  world has Level 0 (a seat linked to their address) and both parts of every scored level that
+  is live on this network, then returns a card with a random 24-character id. The card record
+  and its cached PNG live in `$DCH_DATA_DIR/awards/` (0600; not removed when an idle world is
+  evicted, so share links keep working). `GET /award/<id>` is the share page (Open Graph +
+  `twitter:card=summary_large_image`); `GET /award/<id>.png` is the 1200x675 image, rendered
+  once with `@resvg/resvg-js` and the bundled DejaVu Sans font (no system fonts needed).
+  - `DCH_PUBLIC_URL` (default `https://game.dch.everhostx.com`) is used for the absolute
+    `og:image` URL; set it if the game runs on another host.
+  - `DCH_MAX_AWARDS` (default 5000) → 503 when full. Rate limits: `award` class 10/hour per IP
+    (`DCH_RL_AWARD_MAX`), `awardview` 60/min per IP and 600/min server-wide.
+  - CSP stays self-only: the card is a same-origin PNG; the share page has no scripts or inline
+    styles. "Share on X" is a plain link to `x.com/intent/post`; the game never posts.
 - Network: devnet by default (`XRPL_NETWORK=devnet`); set `XRPL_NETWORK=testnet` to switch.
   Only allowlisted test hosts are accepted, and the server must report `network_id` 2 or 1;
   mainnet is refused.

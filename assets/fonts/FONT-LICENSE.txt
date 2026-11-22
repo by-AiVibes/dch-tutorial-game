@@ -1,0 +1,3 @@
+DejaVu Sans and DejaVu Sans Bold (https://dejavu-fonts.github.io/), bundled unmodified so the award image renders without system fonts.
+Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. Bitstream Vera is a trademark of Bitstream, Inc. DejaVu changes are in public domain.
+

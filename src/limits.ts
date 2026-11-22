@@ -11,7 +11,7 @@ export interface LimitRule {
   globalMax?: number;
 }
 
-export type LimitClass = "read" | "account" | "heavy" | "reset" | "world";
+export type LimitClass = "read" | "account" | "heavy" | "reset" | "world" | "award" | "awardview";
 
 /** Defaults; override with DCH_RL_<CLASS>_MAX / DCH_RL_<CLASS>_WINDOW_MS (e.g. for a workshop behind one NAT). */
 export const DEFAULT_RULES: Record<LimitClass, LimitRule> = {
@@ -22,6 +22,8 @@ export const DEFAULT_RULES: Record<LimitClass, LimitRule> = {
   // "Start my world" also spends faucet requests (6 accounts). Per IP here; the global per-hour
   // cap and the stored-world cap live in the Game (DCH_MAX_NEW_WORLDS_PER_HOUR, DCH_MAX_WORLDS).
   world: { max: 3, windowMs: 3_600_000 },
+  award: { max: 10, windowMs: 3_600_000 }, // POST /api/award: create or rename your card
+  awardview: { max: 60, windowMs: 60_000, globalMax: 600 }, // /award/<id> page + PNG (link previews fetch these)
 };
 
 export function rulesFromEnv(env: NodeJS.ProcessEnv = process.env): Record<LimitClass, LimitRule> {
@@ -39,6 +41,8 @@ export function rulesFromEnv(env: NodeJS.ProcessEnv = process.env): Record<Limit
 export function classify(_method: string, path: string): LimitClass {
   if (path === "/api/reset-world") return "reset";
   if (path === "/api/world/start") return "world";
+  if (path === "/api/award") return "award";
+  if (path.startsWith("/award/")) return "awardview";
   if (path.startsWith("/api/account/")) return "account";
   if (path === "/api/objects" || path === "/api/amendments" || path.startsWith("/api/levels/")) return "heavy";
   return "read";

@@ -13,6 +13,8 @@ const rules = (o: Partial<Record<LimitClass, LimitRule>> = {}): Record<LimitClas
   heavy: { max: 2, windowMs: 1000 },
   reset: { max: 1, windowMs: 10_000, globalMax: 2 },
   world: { max: 2, windowMs: 10_000 },
+  award: { max: 2, windowMs: 10_000 },
+  awardview: { max: 3, windowMs: 1000, globalMax: 5 },
   ...o,
 });
 

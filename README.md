@@ -198,7 +198,7 @@ devnet or testnet only (it checks the server first and stops otherwise), no wall
 Level 0 through the graduate card, answers the quizzes from a test-only answer key
 (`e2e/lib.mjs`, never sent to the browser), and prints PASS/FAIL per level.
 
-Mac, one line (Node 22 or newer; get it from nodejs.org or `brew install node@22`):
+Mac, one line (Node 22.18 or newer; get it from nodejs.org or `brew install node@22`):
 
 ```sh
 git clone https://github.com/by-AiVibes/dch-tutorial-game.git && cd dch-tutorial-game && npm ci && npx playwright install chromium && npm run e2e -- --url https://game.dch.everhostx.com
@@ -220,6 +220,9 @@ Output in `./e2e-out/`: `report.md` (short and plain: the result, the fails, one
 easy to paste into a chat or a small local model), `report.json` (every step: time, on-screen error,
 API route + HTTP status + server error, console errors, screenshot, and a "likely code" hint for
 fails) and one screenshot per step. Exit code 0 = all PASS, 1 = a FAIL, 2 = setup problem.
+A level the game shows as "coming soon" is reported as SKIPPED and the result reads
+`PASS (N skipped)`. The script asks the network itself (public `feature` RPC); if the network
+says that level's amendment is enabled, the skip is a FAIL (the game server's check is stale).
 
 One world per run: the first run makes a test wallet and world and keeps only its **address** in
 `./.e2e-player.json`; later runs reuse that world (the server allows 3 new worlds per hour per IP).

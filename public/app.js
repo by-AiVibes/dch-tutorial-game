@@ -48,21 +48,29 @@ let busy = null; // label while a ledger action runs
 const results = {}; // levelId -> { goal, shouldFail } last results this session
 const l0 = { msg: "", bal: null, seedShown: false };
 
+const API_TIMEOUT_MS = 90_000;
 async function api(path, body) {
-  let r;
   // A request that never answers would leave the page busy forever: give up after 90 s
   // (starting a world takes ~30 s; long level runs are background jobs, polled in short calls).
-  const signal = AbortSignal.timeout(90_000);
-  try { r = await fetch(path, body === undefined ? { signal } : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal }); }
-  catch { throw new NetError(); }
-  let j = {};
-  try { j = await r.json(); } catch { /* empty */ }
-  if (r.status === 429 || r.status === 503) throw new Error(`The server is busy. Try again in ${r.headers.get("retry-after") || "a few"} seconds.`);
-  if (!r.ok) throw new Error(j.error || r.statusText);
-  return j;
+  // AbortController + setTimeout, not the AbortSignal timeout() helper (missing on Safari/iOS < 16).
+  const ctl = typeof AbortController === "function" ? new AbortController() : null;
+  let timedOut = false, timer;
+  // Rejects after the limit even where fetch can't be aborted; aborts it where it can.
+  const late = new Promise((_, reject) => { timer = setTimeout(() => { timedOut = true; ctl?.abort(); reject(new SlowError()); }, API_TIMEOUT_MS); });
+  try {
+    const opts = body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
+    if (ctl) opts.signal = ctl.signal;
+    const r = await Promise.race([fetch(path, opts).catch(() => { throw timedOut ? new SlowError() : new NetError(); }), late]);
+    const j = await Promise.race([r.json().catch(() => ({})), late]);
+    if (r.status === 429 || r.status === 503) throw new Error(`The server is busy. Try again in ${r.headers.get("retry-after") || "a few"} seconds.`);
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+  } finally { clearTimeout(timer); }
 }
 /** fetch itself failed (Safari says "Load failed"): the phone lost the connection, not the server. */
-class NetError extends Error { constructor() { super("The connection dropped."); } }
+class NetError extends Error { constructor(msg = "The connection dropped.") { super(msg); } }
+/** No answer within API_TIMEOUT_MS: the connection may be fine; the ledger work is slow. */
+class SlowError extends NetError { constructor() { super("The ledger is slow. Reload to see where you are."); } }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * Run a level part as a background job and poll for it. A level can take minutes (Level 7 waits

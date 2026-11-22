@@ -61,7 +61,9 @@ test("page: while an answer is checked it shows a spinner and exposes busy to th
   assert.match(app, /document\.body\.dataset\.busy = busy \|\| ""/);
   assert.match(app, /busy === "quiz" && !a \? el\("p", \{ class: "result", role: "status" \}, el\("span", \{ class: "spinner"/);
   assert.match(app, /busy === "quiz" \? "Checking your answer…"/);
-  assert.match(app, /AbortSignal\.timeout\(90_000\)/, "a request that never answers can't freeze the page");
+  assert.doesNotMatch(app, /AbortSignal\.timeout/, "missing on Safari/iOS < 16");
+  assert.match(app, /new AbortController\(\)/);
+  assert.match(app, /finally \{ clearTimeout\(timer\); \}/);
 });
 test("e2e player waits on busy and gives slow screens 10 s before a dead end", () => {
   const e2e = readFileSync(new URL("../e2e/play.mjs", import.meta.url), "utf8");
@@ -97,4 +99,30 @@ test("jobs: finished results are slim; busy errors say so in the poll response",
   assert.equal(kv.busy, false);
   assert.equal(kv.errorStatus, 400);
   assert.match(app, /job\.busy \? "The server is busy\. Try again in a few seconds\."/);
+});
+
+/** The page's api() helper, run in a sandbox with a fake fetch and a short timeout. */
+function pageApi(fetchImpl: unknown, { abortController = true } = {}) {
+  const src = app.slice(app.indexOf("const API_TIMEOUT_MS"), app.indexOf("const sleep ="));
+  const body = src.replace("const API_TIMEOUT_MS = 90_000;", "const API_TIMEOUT_MS = 60;") + "\nreturn { api, NetError, SlowError };";
+  return new Function("fetch", "AbortController", "setTimeout", "clearTimeout", body)(fetchImpl, abortController ? AbortController : undefined, setTimeout, clearTimeout);
+}
+const okResponse = (j: unknown) => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => j });
+
+test("page api(): a request that never answers says the ledger is slow (with or without AbortController)", async () => {
+  let aborted = false;
+  const hang = (_p: string, o: any) => new Promise((_, rej) => o?.signal?.addEventListener("abort", () => { aborted = true; rej(new Error("AbortError")); }));
+  const { api, SlowError } = pageApi(hang);
+  await assert.rejects(api("/api/state"), (e: any) => e instanceof SlowError && e.message === "The ledger is slow. Reload to see where you are.");
+  assert.equal(aborted, true, "the hung fetch is aborted");
+  // Safari/iOS < 16 style: no AbortSignal.timeout, maybe no AbortController either: still times out.
+  const old = pageApi(() => new Promise(() => {}), { abortController: false });
+  await assert.rejects(old.api("/api/state"), /The ledger is slow/);
+});
+test("page api(): a real network failure still says the connection dropped; good answers clear the timer", async () => {
+  const { api, NetError, SlowError } = pageApi(async () => { throw new TypeError("Load failed"); });
+  await assert.rejects(api("/api/quiz/answer", {}), (e: any) => e instanceof NetError && !(e instanceof SlowError) && e.message === "The connection dropped.");
+  const good = pageApi(async () => okResponse({ ok: 1 }));
+  assert.deepEqual(await good.api("/api/state"), { ok: 1 });
+  await new Promise((r) => setTimeout(r, 100)); // the 60 ms timer was cleared: no stray rejection
 });

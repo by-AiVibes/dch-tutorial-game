@@ -1,5 +1,6 @@
 // Test-only helpers for e2e/play.mjs. The answer key lives here, outside public/, so it is
 // never served to the browser; test/e2e.test.ts checks it still matches src/quizzes.ts.
+import { featureEnabled, parseFeatures } from "../src/amendments.ts";
 /** Answer key: level id -> [question, right answer text]. Kept in sync by test/e2e.test.ts. */
 export const ANSWER_KEY = {
   wallet: [
@@ -84,3 +85,42 @@ export function scrub(s) {
     .slice(0, 600);
 }
 
+
+/** Public JSON-RPC endpoints used to double-check amendments (read-only `feature` call). */
+export const FEATURE_RPC = {
+  devnet: ["https://s.devnet.rippletest.net:51234/", "https://clio.devnet.rippletest.net/"],
+  testnet: ["https://s.altnet.rippletest.net:51234/", "https://clio.altnet.rippletest.net/"],
+};
+
+/**
+ * What the network itself says is enabled (not the game server's possibly stale check):
+ * { source, amendments } or null when no endpoint answers.
+ */
+export async function networkAmendments(network, fetchImpl = fetch) {
+  for (const url of FEATURE_RPC[network] || []) {
+    try {
+      const r = await fetchImpl(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ method: "feature", params: [{}] }), signal: AbortSignal.timeout(8000) });
+      const j = await r.json();
+      const f = j?.result?.features;
+      if (f && typeof f === "object" && Object.keys(f).length) return { source: new URL(url).host, amendments: parseFeatures(f) };
+    } catch { /* try the next endpoint */ }
+  }
+  return null;
+}
+
+/**
+ * A level the game showed as "coming soon". FAIL when the network reports its feature enabled
+ * (the game should have offered it); SKIPPED when the network agrees it's off, or when the
+ * network couldn't be asked (then the report says so).
+ */
+export function skipVerdict(level, network, report) {
+  if (!level.feature) return { fail: true, status: `FAIL (skipped, but Level ${level.n} needs no amendment)` };
+  if (!report) return { fail: false, status: `SKIPPED (unverified: couldn't reach a ${network} server to check ${level.feature})` };
+  if (featureEnabled(report, level.feature)) return { fail: true, status: `FAIL (skipped, but ${network} reports ${level.feature} enabled; the game server's amendment check is stale: Tools > Re-check)` };
+  return { fail: false, status: `SKIPPED (${level.feature} not enabled on ${network})` };
+}
+
+/** Headline: PASS, "PASS (N skipped)" or FAIL. */
+export function headline(pass, skipped) {
+  return pass ? (skipped ? `PASS (${skipped} skipped)` : "PASS") : "FAIL";
+}

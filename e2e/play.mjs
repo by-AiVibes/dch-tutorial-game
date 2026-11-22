@@ -27,7 +27,7 @@
 //   --out <dir>        output folder (default ./e2e-out)   --headed   --max-minutes <n> (default 30 per run)
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { ANSWER_KEY, likelyCode, scrub } from "./lib.mjs";
+import { ANSWER_KEY, headline, likelyCode, networkAmendments, scrub, skipVerdict } from "./lib.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : true) : dflt; };
@@ -45,8 +45,8 @@ if (!Number.isInteger(RUNS) || RUNS < 1 || RUNS > 20 || (ONLY !== null && !(Numb
   console.error("Usage: npm run e2e -- --url <game url> [--runs 1-20] [--level 0-8] [--fresh] [--wrong <levelId>]");
   process.exit(2);
 }
-const major = Number(process.versions.node.split(".")[0]);
-if (major < 22) { console.error(`Node 22 or newer is needed (this is ${process.versions.node}).`); process.exit(2); }
+const [major, minor] = process.versions.node.split(".").map(Number);
+if (major < 22 || (major === 22 && minor < 18)) { console.error(`Node 22.18 or newer is needed (this is ${process.versions.node}).`); process.exit(2); }
 
 let chromium;
 try { ({ chromium } = await import("playwright")); }
@@ -230,11 +230,22 @@ async function playOnce(run) {
   const view = await (await fetch(`${BASE}/api/state?world=${encodeURIComponent(saved?.address || "")}`)).json().catch(() => null);
   for (const l of view?.levels || []) {
     const r = levels[l.id];
-    if (r && l.available === false) { r.status = "SKIPPED (not enabled on this network)"; continue; }
+    if (r && l.available === false) {
+      netReport ??= await networkAmendments(st.network);
+      const v = skipVerdict(l, st.network, netReport);
+      r.status = v.status; r.skipped = !v.fail;
+      if (v.fail) {
+        r.errors.push(v.status);
+        steps.push({ run, level: l.id, step: "coming soon", action: "skip check", result: "FAIL", ms: 0, score: "", screenError: v.status, api: [], consoleErrors: [], shot: "", likelyCode: "src/amendments.ts featureEnabled(); src/game.ts levelAvailable() / refreshAmendments()" });
+      }
+      continue;
+    }
     if (r && r.status !== "FAIL" && !r.errors.length && (l.quiz ? l.quiz.passed : true) && (l.n === 0 || l.n === 8 || (l.score.goal && l.score.shouldFail))) r.status = r.status === "NOT REACHED" ? "PASS (done earlier in this world)" : "PASS";
   }
   return { steps, levels, graduated, seconds: Math.round((Date.now() - t0) / 1000), score: view ? `${view.score}/${view.maxScore}` : "?" };
 }
+
+let netReport; // what the network itself reports (only fetched if a level was skipped)
 
 // ---- runs ----
 const results = [];
@@ -252,15 +263,17 @@ await browser.close().catch(() => {});
 const allSteps = results.flatMap((r) => r.steps);
 const fails = allSteps.filter((s) => s.result === "FAIL");
 const levelPass = (r, l) => (r.levels[l.id].setup ? true : /^(PASS|SKIPPED)/.test(r.levels[l.id].status));
+const skippedIn = (r) => LEVELS.filter((l) => (!target || l.id === target.id) && r.levels[l.id].skipped).length;
+const maxSkipped = Math.max(0, ...results.map(skippedIn));
 const runOk = (r) => LEVELS.every((l) => (target && l.id !== target.id) || levelPass(r, l)) && (target ? true : r.graduated);
 const overall = !crash && results.length === RUNS && results.every(runOk) && fails.length === 0 ? "PASS" : "FAIL";
 writeFileSync(join(OUT, "report.json"), JSON.stringify({
-  tool: "dch e2e playthrough", url: BASE, network: st.network, overall, runs: RUNS, level: target ? target.n : null, crash,
+  tool: "dch e2e playthrough", url: BASE, network: st.network, overall: headline(overall === "PASS", maxSkipped), skipped: maxSkipped, runs: RUNS, level: target ? target.n : null, crash,
   results: results.map((r, i) => ({ run: i + 1, seconds: r.seconds, score: r.score, graduated: r.graduated, levels: Object.entries(r.levels).map(([id, l]) => ({ id, ...l })) })),
   fails, steps: allSteps,
 }, null, 2));
 const lines = [
-  `DCH e2e: ${overall}`,
+  `DCH e2e: ${headline(overall === "PASS", maxSkipped)}`,
   `URL: ${BASE} (${st.network}). Runs: ${RUNS}.${target ? ` Level ${target.n} only.` : ""} ${new Date().toISOString().slice(0, 16)} UTC.`,
   crash ? `Crash: ${crash}` : null,
   "",
@@ -271,7 +284,7 @@ const lines = [
     ` | likely code: ${f.likelyCode} | screenshot: ${f.shot}`) : ["none"]),
   "",
   ...results.flatMap((r, i) => [
-    `RUN ${i + 1}: ${runOk(r) ? "PASS" : "FAIL"}, ${r.seconds} s, score ${r.score}, graduate card ${target ? "not tested" : r.graduated ? "PASS" : "FAIL"}`,
+    `RUN ${i + 1}: ${headline(runOk(r), skippedIn(r))}, ${r.seconds} s, score ${r.score}, graduate card ${target ? "not tested" : r.graduated ? "PASS" : "FAIL"}`,
     ...LEVELS.filter((l) => !target || l.id === target.id).map((l) => {
       const x = r.levels[l.id];
       const ok = /^(PASS|SKIPPED)/.test(x.status);

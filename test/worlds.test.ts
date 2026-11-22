@@ -116,7 +116,7 @@ test("cap: stored worlds evict the least-recently-used idle world, else 503 with
   clock.t += 10;
   await assert.rejects(g2.startWorld(Z), (e: any) => e instanceof CapError && e.status === 503 && e.retryAfter >= 59);
   clock.t += 120_000;
-  g2.view(Y); // Y used recently; X and the older worlds are idle
+  g2.claim("holder", "y", null, Y); // Y used recently (a mutating call); X and the older worlds are idle
   for (const k of (g2 as any).lastUsed.keys()) if (k !== X && k !== Y) (g2 as any).lastUsed.set(k, clock.t); // keep others active
   await g2.startWorld(Z);
   assert.equal(existsSync(statePath("devnet", X)), false, "LRU idle world X evicted");
@@ -176,4 +176,78 @@ test("server: start route, per-world state, per-IP 429, cap 429/503 with Retry-A
   }
   // nothing on disk holds a seed that came from a request
   for (const f of readdirSync(join(process.env.DCH_DATA_DIR!, "players"))) assert.ok(!readFileSync(join(process.env.DCH_DATA_DIR!, "players", f), "utf8").includes(SEED));
+});
+
+test("lastUsed: reads (state, objects) don't refresh a world; start, seats and level runs do", async () => {
+  const clock = { t: 30_000_000 };
+  const { g, any } = fakeGame({}, clock);
+  const P = Wallet.generate().address;
+  await g.startWorld(P);
+  const t0 = any.lastUsed.get(P);
+  clock.t += 1000;
+  g.view(P);
+  any.st(P);
+  await g.objects(P).catch(() => undefined); // fake ledger has no request(); the read must not touch either way
+  assert.equal(any.lastUsed.get(P), t0, "GET-style reads leave lastUsed alone");
+  g.claim("holder", "p", null, P);
+  assert.equal(any.lastUsed.get(P), clock.t, "claim refreshes");
+  clock.t += 1000;
+  g.release("holder", "p", P);
+  assert.equal(any.lastUsed.get(P), clock.t, "release refreshes");
+  clock.t += 1000;
+  await g.play("nosuchlevel", "goal", "p", P).catch(() => undefined);
+  assert.equal(any.lastUsed.get(P), clock.t, "a level run refreshes");
+  clock.t += 1000;
+  await g.startWorld(P);
+  assert.equal(any.lastUsed.get(P), clock.t, "start (even idempotent) refreshes");
+});
+
+test("cap: starts still funding count toward the stored-world cap (no overshoot)", async () => {
+  const clock = { t: 40_000_000 };
+  const { g, any } = fakeGame({}, clock);
+  const n = any.lastUsed.size;
+  any.caps = { maxWorlds: n + 1, minIdleMs: 3_600_000, newPerHour: 100 };
+  for (const k of any.lastUsed.keys()) any.lastUsed.set(k, clock.t); // nothing idle to evict
+  const real = any.fundAccounts;
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  any.fundAccounts = async (c: unknown) => { await gate; return real(c); };
+  const X = Wallet.generate().address, Y = Wallet.generate().address;
+  const px = g.startWorld(X); // in flight: holds the last slot
+  await new Promise((r) => setTimeout(r, 5));
+  await assert.rejects(g.startWorld(Y), (e: any) => e instanceof CapError && e.status === 503 && e.retryAfter > 0);
+  release();
+  await px;
+  assert.equal(any.lastUsed.size, n + 1, "exactly at the cap");
+  assert.equal(any.pending.size, 0);
+  // a failed start frees its in-flight slot
+  any.caps = { ...any.caps, maxWorlds: n + 2 };
+  any.fundAccounts = async () => { throw new Error("faucet failed."); };
+  await assert.rejects(g.startWorld(Y), /faucet failed/);
+  assert.equal(any.pending.size, 0);
+});
+
+test("server: with the shared world off, no ?world gives a blank view, not the shared world", async () => {
+  const { g, any } = fakeGame();
+  any.shared.world = 3;
+  any.shared.scores = { issue: { goal: true, shouldFail: true } };
+  const server = createServer(createHandler(g, new RateLimiter(DEFAULT_RULES), false));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    let v = await (await fetch(`${base}/api/state`)).json();
+    assert.equal(v.world, 3, "shared world visible by default (CLI/instructor setups)");
+    process.env.DCH_SHARED_WORLD_HTTP = "0";
+    v = await (await fetch(`${base}/api/state`)).json();
+    assert.equal(v.world, 0);
+    assert.equal(v.score, 0);
+    assert.equal(v.owner, null);
+    assert.deepEqual(v.accounts ?? {}, {});
+    assert.ok(v.levels.every((l: any) => !l.score.goal && !l.score.shouldFail), "no shared scores leak");
+    const o = await (await fetch(`${base}/api/objects`)).json();
+    assert.deepEqual(o, { network: "devnet", world: 0, objects: [] });
+  } finally {
+    delete process.env.DCH_SHARED_WORLD_HTTP;
+    await new Promise((r) => server.close(r));
+  }
 });

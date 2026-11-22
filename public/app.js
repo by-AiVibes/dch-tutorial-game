@@ -58,6 +58,8 @@ async function api(path, body) {
 }
 async function refresh() {
   state = await api("/api/state" + wq());
+  // No address yet: show a fresh circuit, never another world's progress.
+  if (!addr()) state = { ...state, world: 0, score: 0, levels: state.levels.map((l) => ({ ...l, score: { goal: false, shouldFail: false } })) };
   render();
 }
 async function act(label, fn) {
@@ -337,7 +339,7 @@ function scoredCards(l) {
   const roleList = l.goalRoles.join(", ");
 
   let goalBtn, failBtn;
-  const noWorld = !state.world;
+  const noWorld = !addr() || !state.world;
   const toLevel0 = () => { ui.step.wallet = 4; saveUi(); go("#/level/wallet"); };
   const cards = [
     { title: l.title, diag: `${l.id}:goal`, body: [el("p", { class: "lead" }, l.goal)], moreText: [l.bots, l.priority ? "Education Month priority level." : null].filter(Boolean) },

@@ -86,8 +86,15 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
     if (w) assertNoSecrets(w);
     return Game.key(w);
   };
-  if (req.method === "GET" && p === "/api/state") return send(res, 200, game.view(qWorld()));
-  if (req.method === "GET" && p === "/api/objects") return send(res, 200, await game.objects(qWorld()));
+  // With the shared world off over HTTP, no ?world means a blank view, never the shared world.
+  if (req.method === "GET" && p === "/api/state") {
+    const k = qWorld();
+    return send(res, 200, k === null && !SHARED_WORLD_HTTP() ? game.blankView() : game.view(k));
+  }
+  if (req.method === "GET" && p === "/api/objects") {
+    const k = qWorld();
+    return send(res, 200, k === null && !SHARED_WORLD_HTTP() ? { network: game.cfg.name, world: 0, objects: [] } : await game.objects(k));
+  }
   const acct = /^\/api\/account\/([^/]+)$/.exec(p);
   if (req.method === "GET" && acct) {
     assertNoSecrets(decodeURIComponent(acct[1]));

@@ -73,6 +73,7 @@ export const DIAG = {
 };
 
 /** Build the figure for a diagram key (or null). */
+let diagSeq = 0;
 export function diagram(key) {
   const d = DIAG[key];
   if (!d) return null;
@@ -90,12 +91,13 @@ export function diagram(key) {
     svg.append(e);
     return e;
   };
-  add("defs", {}).innerHTML = '<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#7ee2a8"/></marker><marker id="ahb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#f85149"/></marker>';
+  const uid = `d${++diagSeq}`;
+  add("defs", {}).innerHTML = `<marker id="${uid}-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#7ee2a8"/></marker><marker id="${uid}-ahb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#f85149"/></marker>`;
   d.links.forEach((lab, i) => {
     if (i >= N - 1) return;
     const bad = d.bad === i;
     const x1 = x(i) + 26, x2 = x(i + 1) - 26;
-    add("line", { x1, y1: 32, x2, y2: 32, class: bad ? "dl bad" : "dl", "marker-end": `url(#${bad ? "ahb" : "ah"})` });
+    add("line", { x1, y1: 32, x2, y2: 32, class: bad ? "dl bad" : "dl", "marker-end": `url(#${uid}-${bad ? "ahb" : "ah"})` });
     if (lab) add("text", { x: (x1 + x2) / 2, y: 22, class: "dlab" + (bad ? " bad" : "") }, lab);
     if (bad) add("text", { x: (x1 + x2) / 2, y: 50, class: "dx" }, "✗");
   });

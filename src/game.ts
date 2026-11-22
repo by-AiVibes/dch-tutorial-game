@@ -40,6 +40,8 @@ export class Game {
   private worlds = new Map<string, WorldState>();
   /** owner -> last use (ms), for LRU eviction. Seeded from file times at startup. */
   private lastUsed = new Map<string, number>();
+  /** New worlds whose start is still funding (counted against the stored-world cap). */
+  private pending = new Set<string>();
   private created: number[] = [];
   private queues = new Map<string, Promise<unknown>>();
   readonly caps: WorldCaps;
@@ -69,8 +71,12 @@ export class Game {
       w = load(this.cfg.name, key);
       if (w.world) this.worlds.set(key, w);
     }
-    if (w.world) this.lastUsed.set(key, this.now());
     return w;
+  }
+
+  /** Mark a stored player world as recently used (mutating calls only, not reads). */
+  private touch(key: WorldKey) {
+    if (key !== null && this.lastUsed.has(key)) this.lastUsed.set(key, this.now());
   }
 
   private persist(w: WorldState) {
@@ -121,8 +127,13 @@ export class Game {
     if (this.client?.isConnected()) await this.client.disconnect();
   }
 
-  view(key: WorldKey = null) {
-    const state = this.st(key);
+  /** A blank view: no world, no scores (used when the shared world is off over HTTP). */
+  blankView() {
+    return this.view(null, true);
+  }
+
+  view(key: WorldKey = null, blank = false) {
+    const state = blank ? emptyWorld(this.cfg.name) : this.st(key);
     const net = this.cfg.name;
     const fill = (t: string) => t.replaceAll("{network}", net).replaceAll("{Network}", net[0].toUpperCase() + net.slice(1));
     const levels = LEVELS.map((l) => ({
@@ -136,7 +147,7 @@ export class Game {
     return {
       ...publicView(state),
       amendments: this.shared.amendments,
-      owner: key,
+      owner: blank ? null : key,
       network: this.cfg.name,
       explorer: this.cfg.explorer,
       faucetHost: this.cfg.faucetHost,
@@ -158,6 +169,7 @@ export class Game {
     if (!isRole(role)) throw new Error("unknown role");
     const state = this.st(key);
     if (key !== null && !state.world) throw new Error("Start your world first.");
+    this.touch(key);
     state.seats = claimSeat(state.seats, role, player, wallet);
     this.persist(state);
     return this.view(key);
@@ -167,6 +179,7 @@ export class Game {
     if (!isRole(role)) throw new Error("unknown role");
     const state = this.st(key);
     if (key !== null && !state.world) throw new Error("Start your world first.");
+    this.touch(key);
     state.seats = releaseSeat(state.seats, role, player);
     this.persist(state);
     return this.view(key);
@@ -220,24 +233,29 @@ export class Game {
     if (key === null) throw new Error("world must be your classic XRPL address (r…)");
     return this.exclusive(key, async () => {
       const existing = this.st(key);
+      this.touch(key);
       if (existing.world && !fresh) return this.view(key);
       const t = this.now();
       this.created = this.created.filter((x) => t - x < 3_600_000);
       if (this.created.length >= this.caps.newPerHour) {
         throw new CapError("Too many new worlds this hour on this server. Try again later.", 429, (this.created[0] + 3_600_000 - t) / 1000);
       }
-      if (!existing.world) this.makeRoom(key, t);
+      const isNew = !existing.world;
+      if (isNew) { this.makeRoom(key, t); this.pending.add(key); }
       this.created.push(t); // counts even if the faucet fails: the requests were spent
-      const client = await this.ledger();
       let accounts: WorldState["accounts"];
+      let client: Client;
       try {
+        client = await this.ledger();
         accounts = await this.fundAccounts(client);
       } catch (e) {
+        if (isNew) this.pending.delete(key);
         throw new Error(`${(e as Error).message} Your world wasn't created; try again in a minute.`);
       }
       if (!this.shared.amendments) { this.shared.amendments = await checkAmendments(client, this.cfg.name); save(this.shared); }
       const w: WorldState = { ...emptyWorld(this.cfg.name), owner: key, world: existing.world + 1, createdAt: new Date(t).toISOString(), accounts };
       this.persist(w);
+      this.pending.delete(key);
       this.log(`player world ${key.slice(0, 6)}… #${w.world} ready on ${this.cfg.name}`);
       return this.view(key);
     });
@@ -246,8 +264,11 @@ export class Game {
   /** Keep stored worlds under the cap: evict the least-recently-used idle world, or refuse. */
   private makeRoom(key: string, t: number) {
     const others = [...this.lastUsed.entries()].filter(([k]) => k !== key);
-    if (others.length < this.caps.maxWorlds) return;
+    // Starts still funding count too, so concurrent starts can't overshoot the cap.
+    const inFlight = [...this.pending].filter((k) => k !== key && !this.lastUsed.has(k)).length;
+    if (others.length + inFlight < this.caps.maxWorlds) return;
     others.sort((a, b) => a[1] - b[1]);
+    if (!others.length) throw new CapError("The server is full of new worlds right now. Try again in a minute.", 503, 60);
     const [oldKey, used] = others[0];
     if (t - used < this.caps.minIdleMs) {
       throw new CapError("The server is full of active worlds right now. Try again later.", 503, (used + this.caps.minIdleMs - t) / 1000);
@@ -296,6 +317,7 @@ export class Game {
   play(levelId: string, part: Part, player: string | null, key: WorldKey = null) {
     return this.exclusive(key, async () => {
       const state = this.st(key);
+      this.touch(key);
       const level = findLevel(levelId);
       if (!level) throw new Error("unknown level");
       if (!this.levelAvailable(levelId)) {

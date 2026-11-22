@@ -1,6 +1,9 @@
 // CLI: `npm run dch -- <command>`. Prints addresses, results and tx hashes; never seeds.
 
-import { loadConfig } from "./config.ts";
+import { join } from "node:path";
+import { DATA_DIR, loadConfig } from "./config.ts";
+import { LEVELS } from "./levels/index.ts";
+import { formatStats, Stats } from "./stats.ts";
 import { Game } from "./game.ts";
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -9,9 +12,21 @@ const usage = `usage:
   amendments                  check amendments on the network (feature RPC)
   play <level> goal|should-fail [player]
   play-all                    run every playable level's goal and should-fail in order (smoke)
-  status                      print the world (no secrets)`;
+  status                      print the world (no secrets)
+  stats [days] [--json]       visitor and player counts from the stats file (counts only)`;
 
 async function main() {
+  if (cmd === "stats") {
+    // Reads the file the server writes; no network, no world access.
+    const path = join(DATA_DIR, "stats.json");
+    const data = Stats.read(path);
+    if (!data) { console.log(`no stats yet (${path})`); return; }
+    const s = new Stats(path, { network: data.network, flushMs: 1e9 });
+    const days = Number(args.find((a) => /^\d+$/.test(a)) ?? 14);
+    const snap = s.snapshot(days);
+    console.log(args.includes("--json") ? JSON.stringify(snap, null, 2) : formatStats(snap, LEVELS.map((l) => l.id)));
+    return;
+  }
   const cfg = loadConfig();
   const game = new Game(cfg, (m) => console.log(`  · ${m}`));
   try {

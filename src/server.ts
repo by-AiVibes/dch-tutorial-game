@@ -4,7 +4,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "./config.ts";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { DATA_DIR, loadConfig } from "./config.ts";
+import { Stats } from "./stats.ts";
 import { Game } from "./game.ts";
 import { AWARD_ID_RE, awardHtml, awardPng, loadAward, publicBase } from "./award.ts";
 import { assertNoSecrets, cleanAddress } from "./secrets.ts";
@@ -55,6 +57,20 @@ const VENDOR: Record<string, string> = {
   "/vendor/xrpl.js": join(import.meta.dirname, "..", "node_modules", "xrpl", "build", "xrpl-latest-min.js"),
 };
 
+/** Bearer DCH_STATS_TOKEN (at least 16 characters), compared in constant time. */
+export function statsAuthorized(header: string | undefined, token = process.env.DCH_STATS_TOKEN ?? ""): boolean {
+  if (token.length < 16 || !header) return false;
+  const m = /^Bearer\s+(\S+)$/.exec(header);
+  if (!m) return false;
+  const h = (x: string) => createHash("sha256").update(x).digest();
+  return timingSafeEqual(h(m[1]), h(token));
+}
+
+/** The stats file next to the worlds (DCH_DATA_DIR/stats.json), with testers excluded. */
+export function openStats(network: string) {
+  return new Stats(join(DATA_DIR, "stats.json"), { network, ignoreIps: process.env.DCH_STATS_IGNORE_IPS, ignoreUa: process.env.DCH_STATS_IGNORE_UA });
+}
+
 export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv()), trustProxy = process.env.TRUST_PROXY === "1", jobs = new JobStore()) {
   return (req: IncomingMessage, res: ServerResponse) => {
     let path = "/";
@@ -69,13 +85,13 @@ export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv
       res.writeHead(429, { "content-type": "application/json", "retry-after": String(wait), "cache-control": "no-store" });
       return res.end(JSON.stringify({ error: "rate_limited", retryAfterSeconds: wait }));
     }
-    handle(game, req, res, trustProxy, jobs).catch((e) =>
+    handle(game, req, res, trustProxy, jobs, ip).catch((e) =>
       e instanceof BusyError ? sendBusy(res, e.message) : e instanceof CapError ? sendCap(res, e) : send(res, 400, { error: e instanceof Error ? e.message : String(e) }),
     );
   };
 }
 
-async function handle(game: Game, req: IncomingMessage, res: ServerResponse, trustProxy = false, jobs = new JobStore()) {
+async function handle(game: Game, req: IncomingMessage, res: ServerResponse, trustProxy = false, jobs = new JobStore(), ip = "") {
   let url: URL;
   try {
     url = new URL(req.url ?? "/", "http://localhost");
@@ -89,6 +105,13 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
     if (w) assertNoSecrets(w);
     return Game.key(w);
   };
+  // Visitor/player counts: only with the right bearer token; otherwise indistinguishable from
+  // a route that doesn't exist (404), including when DCH_STATS_TOKEN is unset.
+  if (p === "/api/stats") {
+    if (req.method !== "GET" || !game.stats || !statsAuthorized(req.headers.authorization)) return send(res, 404, { error: "not_found" });
+    const d = Number(url.searchParams.get("days") ?? 30);
+    return send(res, 200, game.stats.snapshot(Number.isInteger(d) && d > 0 ? d : 30));
+  }
   // With the shared world off over HTTP, no ?world means a blank view, never the shared world.
   if (req.method === "GET" && p === "/api/state") {
     const k = qWorld();
@@ -119,6 +142,7 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
       res.writeHead(200, { "content-type": "image/png", "content-length": String(png.length), "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" });
       return res.end(png);
     }
+    game.stats?.awardView(ip, req.headers["user-agent"]);
     res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" });
     return res.end(awardHtml(rec, publicBase(req.headers.host, trustProxy)));
   }
@@ -136,7 +160,7 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
     const b = await body(req);
     assertNoSecrets(b); // before anything else touches or logs the body
     const player = typeof b.player === "string" ? b.player : null;
-    if (p === "/api/world/start") return send(res, 200, await game.startWorld(b.world, b.fresh === true));
+    if (p === "/api/world/start") return send(res, 200, await game.startWorld(b.world, b.fresh === true, { statsIgnore: game.stats?.isIgnored(ip, req.headers["user-agent"]) ?? false }));
     if (p === "/api/award") return send(res, 200, await game.graduate(b.world, b.name));
     const key = Game.key(b.world);
     const sharedOk = key !== null || SHARED_WORLD_HTTP();
@@ -171,6 +195,7 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
     if (!file.startsWith(PUBLIC)) return send(res, 404, { error: "not_found" });
     try {
       const data = await readFile(file);
+      if (rel === "/index.html") game.stats?.visit(ip, req.headers["user-agent"]);
       res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" });
       return res.end(data);
     } catch {
@@ -182,7 +207,19 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const game = new Game(loadConfig(), (m) => console.log(m));
+  // Stats never stop the game: a bad file or an unwritable disk only logs a line.
+  try {
+    game.stats = openStats(game.cfg.name);
+    if (process.env.DCH_STATS_BACKFILL !== "0") {
+      const bf = game.backfillStats();
+      if (bf) console.log(`stats: backfilled ${bf.worlds} worlds and ${bf.awards} awards`);
+    }
+  } catch {
+    console.error("stats: backfill failed; counting goes on without it");
+  }
   const server = createServer(createHandler(game));
+  // Save the counters on a normal stop (systemd sends SIGTERM); writes are atomic anyway.
+  for (const sig of ["SIGTERM", "SIGINT"] as const) process.once(sig, () => { try { game.stats?.flush(); } finally { process.exit(0); } });
   // Slowloris / idle-connection protection (the proxy has its own timeouts too).
   server.headersTimeout = 10_000;
   server.requestTimeout = 30_000;

@@ -81,6 +81,22 @@ Plan, for later:
     (`DCH_RL_AWARD_MAX`), `awardview` 60/min per IP and 600/min server-wide.
   - CSP stays self-only: the card is a same-origin PNG; the share page has no scripts or inline
     styles. "Share on X" is a plain link to `x.com/intent/post`; the game never posts.
+- Stats (visitor and player counts): `$DCH_DATA_DIR/stats.json` (0600, atomic writes, at most
+  every 5 s and on SIGTERM). Not touched by world eviction. Per UTC day plus lifetime: unique
+  visitors and page views (`GET /`), card share-page views, worlds started, level steps done and
+  quizzes passed per level, graduates, first-try quiz points. Player events count once per
+  world. No IPs, addresses or user agents are stored: a visitor is an HMAC of the IP under a
+  random in-memory key replaced every UTC day; only the daily count is written.
+  - `DCH_STATS_TOKEN` (16+ chars, random): enables `GET /api/stats?days=30` with
+    `Authorization: Bearer <token>`. Without it (or unset) the route is a plain 404. Rate class
+    `account`.
+  - `DCH_STATS_IGNORE_IPS`: comma-separated tester IPs or IPv4 CIDRs, not counted (page views or
+    worlds they start). `DCH_STATS_IGNORE_UA` (default `DCH-e2e`): user-agent markers not
+    counted; the e2e and play-through scripts send `DCH-e2e`.
+  - `DCH_STATS_BACKFILL=0` skips the one-time backfill from the worlds and award cards already on
+    disk (it runs on the first start with stats; awards of evicted worlds count as graduates).
+  - Read it on the server: `sudo -u dchgame env DCH_DATA_DIR=/var/lib/dch-game npm run dch -- stats [days] [--json]`
+    in `/opt/dch-game`.
 - Network: devnet by default (`XRPL_NETWORK=devnet`); set `XRPL_NETWORK=testnet` to switch.
   Only allowlisted test hosts are accepted, and the server must report `network_id` 2 or 1;
   mainnet is refused.

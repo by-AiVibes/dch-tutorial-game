@@ -40,6 +40,10 @@ export interface WorldState {
   award?: { id: string; date: string } | null;
   /** Quiz progress per level id. Absent in worlds from before quizzes: those players take them. */
   quizzes?: Record<string, QuizProgress>;
+  /** Stats events this world already counted (see stats.ts), so each counts once per world. */
+  statsCounted?: string[];
+  /** Started by a tester (ignored IP or e2e user agent): never counted in stats. */
+  statsIgnore?: boolean;
 }
 
 export function emptyWorld(network: string): WorldState {
@@ -101,7 +105,7 @@ export function save(state: WorldState): void {
 
 /** Public view: addresses only, no seeds. */
 export function publicView(state: WorldState) {
-  const { accounts, ...rest } = state;
+  const { accounts, statsCounted: _c, statsIgnore: _i, ...rest } = state;
   return {
     ...rest,
     accounts: Object.fromEntries(Object.entries(accounts).map(([k, a]) => [k, { address: a.address }])),

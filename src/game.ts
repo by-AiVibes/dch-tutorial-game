@@ -12,6 +12,7 @@ import { botSeats, canAct, claimSeat, isRole, releaseSeat, ROLES } from "./seats
 import { CapError, QueueGate } from "./limits.ts";
 import { emptyProgress, publicQuiz, QUIZ_MAX, QUIZ_PASS, QUIZ_POINTS, QUIZZES, quizPoints, type QuizProgress } from "./quizzes.ts";
 import { awardCount, cleanName, loadAward, newAwardId, saveAward, SHORT, type AwardRecord } from "./award.ts";
+import type { StatEvent, Stats } from "./stats.ts";
 import { deleteWorld, emptyWorld, listPlayerWorlds, load, publicView, save, type RecentResult, type WorldState } from "./store.ts";
 import { cleanAddress } from "./secrets.ts";
 
@@ -58,6 +59,49 @@ export class Game {
   private gate = new QueueGate(Number(process.env.DCH_MAX_QUEUE) > 0 ? Number(process.env.DCH_MAX_QUEUE) : 8);
   readonly cfg: NetworkConfig;
   log: (msg: string) => void;
+
+  /** Visitor/player counters (server only; null in tests and the CLI unless attached). */
+  stats: Stats | null = null;
+
+  /** Count a player event once per world (player worlds only). The caller persists the world. */
+  private count(state: WorldState, key: WorldKey, e: StatEvent, atMs?: number) {
+    if (key === null || !this.stats) return false;
+    return this.stats.record(state, e, atMs);
+  }
+
+  /**
+   * One-time backfill from the worlds and award cards already on disk (marks each world's
+   * events as counted). Awards whose world was evicted still count as graduates.
+   */
+  backfillStats() {
+    const s = this.stats;
+    if (!s || s.data.backfill) return null;
+    let worlds = 0, gradsInWorlds = 0;
+    for (const { owner } of listPlayerWorlds(this.cfg.name)) {
+      const state = this.st(owner);
+      if (!state.world) continue;
+      worlds++;
+      const at = Date.parse(state.createdAt ?? "") || this.now();
+      let changed = this.count(state, owner, { type: "world" }, at);
+      if (Object.values(state.seats).some((x) => x.wallet && x.wallet === owner)) changed = this.count(state, owner, { type: "level", id: "wallet" }, at) || changed;
+      for (const l of SCORED_LEVELS) if (state.scores[l.id]?.goal && state.scores[l.id]?.shouldFail) changed = this.count(state, owner, { type: "level", id: l.id }, at) || changed;
+      for (const [id, p] of Object.entries(state.quizzes ?? {})) {
+        if (p.attempts > 1 || p.answers.length >= (QUIZZES[id]?.length ?? 3) || p.passed) changed = this.count(state, owner, { type: "quizFirst", id, points: p.points }, at) || changed;
+        if (p.passed) changed = this.count(state, owner, { type: "quiz", id }, at) || changed;
+      }
+      if (state.award) { gradsInWorlds++; changed = this.count(state, owner, { type: "grad" }, Date.parse(state.award.date) || at) || changed; }
+      if (changed) {
+        try { this.persist(state); } catch { this.log("stats: couldn't mark a world as counted during backfill"); }
+      }
+    }
+    const awards = awardCount();
+    // Award cards of evicted worlds (their worlds are gone, the cards are not).
+    const orphans = Math.max(0, awards - gradsInWorlds);
+    if (orphans) s.addGraduates(orphans, this.now());
+    s.data.backfill = { at: new Date(this.now()).toISOString(), worlds, awards };
+    s.flush(); // never throws; a failed save is retried on the next change
+    return s.data.backfill;
+  }
 
   constructor(cfg: NetworkConfig, log: (msg: string) => void = () => {}, caps: WorldCaps = defaultCaps(), now: () => number = Date.now) {
     this.cfg = cfg;
@@ -224,8 +268,8 @@ export class Game {
       const right = p.answers.filter((a) => a.correct).length;
       if (p.answers.length === qs.length) {
         done = true;
-        if (p.attempts === 1) p.points = right * QUIZ_POINTS;
-        if (right >= QUIZ_PASS) p.passed = true;
+        if (p.attempts === 1) { p.points = right * QUIZ_POINTS; this.count(state, key, { type: "quizFirst", id, points: p.points }); }
+        if (right >= QUIZ_PASS) { p.passed = true; this.count(state, key, { type: "quiz", id }); }
       }
       this.touch(key);
       this.persist(state);
@@ -264,6 +308,8 @@ export class Game {
     if (key !== null && !state.world) throw new Error("Start your world first.");
     this.touch(key);
     state.seats = claimSeat(state.seats, role, player, wallet);
+    // Level 0's steps: a seat linked to the player's own address.
+    if (key !== null && wallet === key && Object.values(state.seats).some((x) => x.wallet === key)) this.count(state, key, { type: "level", id: "wallet" });
     this.persist(state);
     return this.view(key);
   }
@@ -321,7 +367,7 @@ export class Game {
    * fresh = true. Caps: new worlds per hour (429) and stored worlds (LRU-evicts idle ones,
    * else 503), both with Retry-After.
    */
-  async startWorld(rawKey: unknown, fresh = false) {
+  async startWorld(rawKey: unknown, fresh = false, opts: { statsIgnore?: boolean } = {}) {
     const key = Game.key(rawKey);
     if (key === null) throw new Error("world must be your classic XRPL address (r…)");
     return this.exclusive(key, async () => {
@@ -346,7 +392,8 @@ export class Game {
         throw new Error(`${(e as Error).message} Your world wasn't created; try again in a minute.`);
       }
       if (!this.shared.amendments) { this.shared.amendments = await checkAmendments(client, this.cfg.name); save(this.shared); }
-      const w: WorldState = { ...emptyWorld(this.cfg.name), owner: key, world: existing.world + 1, createdAt: new Date(t).toISOString(), accounts };
+      const w: WorldState = { ...emptyWorld(this.cfg.name), owner: key, world: existing.world + 1, createdAt: new Date(t).toISOString(), accounts, ...(opts.statsIgnore ? { statsIgnore: true } : {}) };
+      this.count(w, key, { type: "world" });
       this.persist(w);
       this.pending.delete(key);
       this.log(`player world ${key.slice(0, 6)}… #${w.world} ready on ${this.cfg.name}`);
@@ -373,6 +420,7 @@ export class Game {
         if (awardCount() >= (this.caps.maxAwards ?? 2000)) throw new CapError("Too many awards stored on this server right now. Try again later.", 503, 3600);
         const date = state.award?.date ?? new Date(this.now()).toISOString().slice(0, 10);
         state.award = { id: newAwardId(), date };
+        this.count(state, key, { type: "grad" });
         this.persist(state);
       }
       const next: AwardRecord = {
@@ -546,6 +594,7 @@ export class Game {
           message = `Inconclusive (${label}): the attempt never reached a final ledger result (network, queue or timeout). No points; try again.`;
         }
       }
+      if (state.scores[levelId]?.goal && state.scores[levelId]?.shouldFail) this.count(state, key, { type: "level", id: levelId });
       this.persist(state);
       return { ok: out.ok, message, added, results: out.results, view: this.view(key) };
     });

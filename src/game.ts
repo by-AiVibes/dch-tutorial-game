@@ -45,10 +45,12 @@ export class Game {
   }
 
   view() {
+    const net = this.cfg.name;
+    const fill = (t: string) => t.replaceAll("{network}", net).replaceAll("{Network}", net[0].toUpperCase() + net.slice(1));
     const levels = LEVELS.map((l) => ({
-      id: l.id, n: l.n, title: l.title, feature: l.feature, priority: !!l.priority,
-      goal: l.goal, shouldFail: l.shouldFail, rejectReason: l.rejectReason, bots: l.bots,
-      goalRoles: l.goalRoles, shouldFailRoles: l.shouldFailRoles, docs: l.docs, explainer: l.explainer ?? null,
+      id: l.id, n: l.n, title: fill(l.title), feature: l.feature, priority: !!l.priority,
+      goal: fill(l.goal), shouldFail: l.shouldFail, rejectReason: l.rejectReason, bots: l.bots,
+      goalRoles: l.goalRoles, shouldFailRoles: l.shouldFailRoles, docs: l.docs, explainer: l.explainer?.map(fill) ?? null,
       available: this.levelAvailable(l.id),
       playable: !!l.runGoal && this.levelAvailable(l.id),
       score: this.state.scores[l.id] ?? { goal: false, shouldFail: false },
@@ -57,6 +59,7 @@ export class Game {
       ...publicView(this.state),
       network: this.cfg.name,
       explorer: this.cfg.explorer,
+      faucetHost: this.cfg.faucetHost,
       score: total(this.state.scores),
       maxScore: MAX_SCORE,
       scoredLevels: SCORED_LEVELS.length,
@@ -71,9 +74,9 @@ export class Game {
     return featureEnabled(this.state.amendments, l.feature);
   }
 
-  claim(role: string, player: string) {
+  claim(role: string, player: string, wallet: string | null = null) {
     if (!isRole(role)) throw new Error("unknown role");
-    this.state.seats = claimSeat(this.state.seats, role, player);
+    this.state.seats = claimSeat(this.state.seats, role, player, wallet);
     save(this.state);
     return this.view();
   }
@@ -83,6 +86,24 @@ export class Game {
     this.state.seats = releaseSeat(this.state.seats, role, player);
     save(this.state);
     return this.view();
+  }
+
+  /** Level 0: live balance and reserve for a player's address (address only; read-only). */
+  account(address: string) {
+    return this.exclusive(async () => {
+      const client = await this.ledger();
+      const si = await client.request({ command: "server_info" });
+      const vl = si.result.info.validated_ledger;
+      try {
+        const r = await client.request({ command: "account_info", account: address, ledger_index: "validated" });
+        return { address, funded: true, balanceXrp: Number(r.result.account_data.Balance) / 1e6, reserveBaseXrp: vl?.reserve_base_xrp ?? null, network: this.cfg.name };
+      } catch (e) {
+        if (/actNotFound/.test(String((e as { data?: { error?: string } }).data?.error ?? e))) {
+          return { address, funded: false, balanceXrp: 0, reserveBaseXrp: vl?.reserve_base_xrp ?? null, network: this.cfg.name };
+        }
+        throw e;
+      }
+    });
   }
 
   refreshAmendments() {

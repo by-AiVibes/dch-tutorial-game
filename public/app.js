@@ -22,7 +22,7 @@ async function api(path, body) {
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
-async function refresh() { state = await api("/api/state"); render(); }
+async function refresh() { state = await api("/api/state"); render(); window.dispatchEvent(new CustomEvent("dch-state", { detail: state })); }
 async function act(fn) {
   if (busy) return; busy = true; lastMsg = "Working… (ledger steps take a few seconds each)"; render();
   try { await fn(); } catch (e) { lastMsg = "Error: " + e.message; }
@@ -41,15 +41,16 @@ function render() {
     return el("div", { class: "seat" },
       el("b", {}, seat.role), el("br"),
       el("span", { class: "tag" + (seat.player ? " ok" : "") }, seat.player ? `human: ${seat.player}` : "bot"),
+      seat.wallet ? el("small", {}, ` wallet ${seat.wallet.slice(0, 8)}…`) : null,
       el("br"), s.accounts[seat.role] ? el("small", {}, s.accounts[seat.role].address.slice(0, 10) + "…") : null, el("br"),
       mine ? el("button", { on: { click: () => act(() => api("/api/seat/release", { role: seat.role, player: me() })) } }, "Leave seat")
            : el("button", { ...(seat.player || !me() ? { disabled: "" } : {}), on: { click: () => act(() => api("/api/seat/claim", { role: seat.role, player: me() })) } }, "Claim"));
   }));
   $("levels").replaceChildren(...s.levels.map((l) => el("div", { class: "lvl" + (l.id === selected ? " sel" : ""), on: { click: () => { selected = l.id; lastMsg = ""; render(); } } },
     el("b", {}, `${l.n}. ${l.title}`), el("br"),
-    l.available ? el("span", { class: "tag ok" }, l.playable ? "playable" : "next slice") : el("span", { class: "tag warn" }, "coming soon"),
+    l.available ? el("span", { class: "tag ok" }, l.playable ? "playable" : l.n === 0 ? "guide" : "next slice") : el("span", { class: "tag warn" }, "coming soon"),
     l.priority ? el("span", { class: "tag pri" }, "priority") : null,
-    l.n <= 7 ? el("span", { class: "tag" }, `${(l.score.goal ? 10 : 0) + (l.score.shouldFail ? 5 : 0) + (l.score.goal && l.score.shouldFail ? 5 : 0)} pts`) : null)));
+    l.n >= 1 && l.n <= 7 ? el("span", { class: "tag" }, `${(l.score.goal ? 10 : 0) + (l.score.shouldFail ? 5 : 0) + (l.score.goal && l.score.shouldFail ? 5 : 0)} pts`) : null)));
   const l = s.levels.find((x) => x.id === selected);
   const disabled = busy || !l.playable || !s.world ? { disabled: "" } : {};
   $("detail").replaceChildren(
@@ -83,6 +84,7 @@ $("objbtn").addEventListener("click", async () => {
       o.objects.map((x) => el("tr", {}, el("td", {}, x.owner), el("td", {}, x.type), el("td", {}, x.detail), el("td", {}, x.id.slice(0, 12) + "…")))) : el("p", {}, "No objects yet."));
   } catch (e) { $("objects").textContent = "Error: " + e.message; }
 });
+window.addEventListener("dch-refresh", () => refresh());
 $("check").addEventListener("click", () => act(() => api("/api/amendments", {})));
 $("reset").addEventListener("click", () => act(async () => { await api("/api/reset-world", {}); lastMsg = "New world ready."; }));
 refresh().catch((e) => { document.body.prepend(el("p", { class: "msg" }, "Server not reachable: " + e.message)); });

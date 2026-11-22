@@ -3,8 +3,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.ts";
 import { Game } from "./game.ts";
+import { assertNoSecrets, cleanAddress } from "./secrets.ts";
 
 const PORT = Number(process.env.PORT || 8790);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -12,8 +14,6 @@ const PUBLIC = join(import.meta.dirname, "..", "public");
 const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css" };
 /** reset-world spends faucet requests; allow it over HTTP only when explicitly enabled. */
 const ALLOW_HTTP_RESET = process.env.DCH_ALLOW_HTTP_RESET === "1";
-
-const game = new Game(loadConfig(), (m) => console.log(m));
 
 function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
@@ -26,10 +26,26 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
     raw += chunk;
     if (raw.length > 4096) throw new Error("body too large");
   }
-  return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new Error("invalid JSON body"); // generic: never echo body text (it could hold a secret)
+  }
 }
 
-async function handle(req: IncomingMessage, res: ServerResponse) {
+/** The browser bundle of xrpl.js, so Level 0 can make a wallet locally (seed stays in the browser). */
+const VENDOR: Record<string, string> = {
+  "/vendor/xrpl.js": join(import.meta.dirname, "..", "node_modules", "xrpl", "build", "xrpl-latest-min.js"),
+};
+
+export function createHandler(game: Game) {
+  return (req: IncomingMessage, res: ServerResponse) => {
+    handle(game, req, res).catch((e) => send(res, 400, { error: e instanceof Error ? e.message : String(e) }));
+  };
+}
+
+async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
   let url: URL;
   try {
     url = new URL(req.url ?? "/", "http://localhost");
@@ -39,10 +55,26 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   const p = url.pathname;
   if (req.method === "GET" && p === "/api/state") return send(res, 200, game.view());
   if (req.method === "GET" && p === "/api/objects") return send(res, 200, await game.objects());
+  const acct = /^\/api\/account\/([^/]+)$/.exec(p);
+  if (req.method === "GET" && acct) {
+    assertNoSecrets(decodeURIComponent(acct[1]));
+    return send(res, 200, await game.account(cleanAddress(decodeURIComponent(acct[1]))));
+  }
+  if (req.method === "GET" && VENDOR[p]) {
+    let data: Buffer;
+    try {
+      data = await readFile(VENDOR[p]);
+    } catch {
+      return send(res, 500, { error: "vendor_missing" }); // never echo the file path
+    }
+    res.writeHead(200, { "content-type": "text/javascript", "cache-control": "public, max-age=3600" });
+    return res.end(data);
+  }
   if (req.method === "POST" && p.startsWith("/api/")) {
     const b = await body(req);
+    assertNoSecrets(b); // before anything else touches or logs the body
     const player = typeof b.player === "string" ? b.player : null;
-    if (p === "/api/seat/claim") return send(res, 200, game.claim(String(b.role), String(b.player)));
+    if (p === "/api/seat/claim") return send(res, 200, game.claim(String(b.role), String(b.player), b.wallet == null || b.wallet === "" ? null : cleanAddress(b.wallet)));
     if (p === "/api/seat/release") return send(res, 200, game.release(String(b.role), String(b.player)));
     if (p === "/api/amendments") return send(res, 200, await game.refreshAmendments());
     if (p === "/api/reset-world") {
@@ -68,6 +100,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   send(res, 405, { error: "method_not_allowed" });
 }
 
-createServer((req, res) => {
-  handle(req, res).catch((e) => send(res, 400, { error: e instanceof Error ? e.message : String(e) }));
-}).listen(PORT, HOST, () => console.log(`DCH tutorial game on http://${HOST}:${PORT} (${game.cfg.name})`));
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const game = new Game(loadConfig(), (m) => console.log(m));
+  createServer(createHandler(game)).listen(PORT, HOST, () => console.log(`DCH tutorial game on http://${HOST}:${PORT} (${game.cfg.name})`));
+}

@@ -52,6 +52,7 @@ levels 6–7 show coming soon. A full devnet run scored 140/140 — see
 
 | # | Level | Needs | Status |
 |---|---|---|---|
+| 0 | Get your devnet wallet (onboarding) | none | **guide**, unscored |
 | 1 | Issue a token, keep rippling off | core rules | **playable** |
 | 2 | Freeze and clawback | Clawback | **playable** |
 | 3 | Issue and accept a credential | Credentials | **playable** |
@@ -60,6 +61,24 @@ levels 6–7 show coming soon. A full devnet run scored 140/140 — see
 | 6 | Deposit in a single-asset vault | SingleAssetVault | **playable** where enabled (devnet), priority |
 | 7 | Fund a loan and repay it | SingleAssetVault + LendingProtocol | **playable** where enabled (devnet), priority |
 | 8 | Explainer: confidential MPT transfers | ConfidentialTransfer | **priority**, read-only explainer (interactive steps planned) |
+
+### Level 0: get your devnet wallet
+
+A guided, unscored start (the 140-point total is unchanged). It explains what devnet is (free
+test XRP with no value; the network can be reset), then the game **creates a wallet in your
+browser** with the xrpl.js browser build. The browser calls the public faucet directly with
+your address, the dashboard confirms the balance live (`GET /api/account/<address>`, address
+only), and you claim a seat with that address, replacing a bot. The seed is shown once with a
+clear warning (save it; test-only; never reuse a test seed on mainnet). It is never stored and
+never sent to the server: the server refuses any request that contains a seed or a secret-named
+field, and never echoes or logs it (see `test/server.test.ts`). In this version, level
+transactions for a seat are still signed by the world's server-side test account for that role;
+signing from your own wallet is planned. Sources:
+[Parallel networks](https://xrpl.org/docs/concepts/networks-and-servers/parallel-networks),
+[Faucets](https://xrpl.org/resources/dev-tools/xrp-faucets),
+[Accounts](https://xrpl.org/docs/concepts/accounts),
+[Reserves](https://xrpl.org/docs/concepts/accounts/reserves),
+[Cryptographic keys](https://xrpl.org/docs/concepts/accounts/cryptographic-keys).
 
 **Priority for the next slices:** the Single Asset Vault and Lending Protocol levels (6–7) and
 the ConfidentialTransfer explainer (8), because these amendments are in voting right now. They

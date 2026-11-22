@@ -11,7 +11,7 @@ export interface LimitRule {
   globalMax?: number;
 }
 
-export type LimitClass = "read" | "account" | "heavy" | "reset";
+export type LimitClass = "read" | "account" | "heavy" | "reset" | "world";
 
 /** Defaults; override with DCH_RL_<CLASS>_MAX / DCH_RL_<CLASS>_WINDOW_MS (e.g. for a workshop behind one NAT). */
 export const DEFAULT_RULES: Record<LimitClass, LimitRule> = {
@@ -19,6 +19,9 @@ export const DEFAULT_RULES: Record<LimitClass, LimitRule> = {
   account: { max: 60, windowMs: 60_000 }, // Level 0 balance polling
   heavy: { max: 12, windowMs: 60_000 }, // level runs, /api/objects, /api/amendments
   reset: { max: 2, windowMs: 3_600_000, globalMax: 6 }, // reset-world spends faucet requests
+  // "Start my world" also spends faucet requests (6 accounts). Per IP here; the global per-hour
+  // cap and the stored-world cap live in the Game (DCH_MAX_NEW_WORLDS_PER_HOUR, DCH_MAX_WORLDS).
+  world: { max: 3, windowMs: 3_600_000 },
 };
 
 export function rulesFromEnv(env: NodeJS.ProcessEnv = process.env): Record<LimitClass, LimitRule> {
@@ -35,6 +38,7 @@ export function rulesFromEnv(env: NodeJS.ProcessEnv = process.env): Record<Limit
 /** Which class a request falls into. */
 export function classify(_method: string, path: string): LimitClass {
   if (path === "/api/reset-world") return "reset";
+  if (path === "/api/world/start") return "world";
   if (path.startsWith("/api/account/")) return "account";
   if (path === "/api/objects" || path === "/api/amendments" || path.startsWith("/api/levels/")) return "heavy";
   return "read";
@@ -134,6 +138,17 @@ export class RateLimiter {
 }
 
 const secs = (ms: number) => Math.max(1, Math.ceil(ms / 1000));
+
+/** A capacity limit with a known wait: the server answers with this status and Retry-After. */
+export class CapError extends Error {
+  status: 429 | 503;
+  retryAfter: number;
+  constructor(message: string, status: 429 | 503, retryAfterSeconds: number) {
+    super(message);
+    this.status = status;
+    this.retryAfter = Math.max(1, Math.ceil(retryAfterSeconds));
+  }
+}
 
 /** Caps how much ledger work can wait in the engine's single queue. */
 export class QueueGate {

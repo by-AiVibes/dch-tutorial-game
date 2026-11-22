@@ -12,6 +12,7 @@ const rules = (o: Partial<Record<LimitClass, LimitRule>> = {}): Record<LimitClas
   account: { max: 5, windowMs: 1000 },
   heavy: { max: 2, windowMs: 1000 },
   reset: { max: 1, windowMs: 10_000, globalMax: 2 },
+  world: { max: 2, windowMs: 10_000 },
   ...o,
 });
 
@@ -120,7 +121,7 @@ test("server: queue full -> 503 with Retry-After 5", async () => {
       // Occupy the single level-queue slot with a never-settling task, then ask for more.
       let release!: () => void;
       const hold = new Promise<void>((r) => (release = r));
-      const busy = (game as any).exclusive(() => hold);
+      const busy = (game as any).exclusive(null, () => hold);
       const r = await fetch(`${base}/api/levels/issue/goal`, { method: "POST", body: "{}" });
       assert.equal(r.status, 503);
       assert.equal(r.headers.get("retry-after"), "5");

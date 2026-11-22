@@ -46,12 +46,12 @@ export async function fund(faucetHost, onProgress = () => {}) {
   return b;
 }
 
-/** Link the wallet ADDRESS to a seat. Never the seed. */
+/** Link the wallet ADDRESS to a seat in the player's own world (keyed by that address). Never the seed. */
 export async function claimWithWallet(role, player) {
   const address = currentAddress();
   const r = await fetch("/api/seat/claim", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ role, player, wallet: address }), // never the seed
+    body: JSON.stringify({ role, player, wallet: address, world: address }), // never the seed
   });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error || r.statusText);

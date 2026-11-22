@@ -1,7 +1,9 @@
 // DCH game UI: a circuit-board level map (home) plus short step cards per level, with a
 // guided pointer at the next thing to click. Uses textContent everywhere (no innerHTML with data).
-// Only UI position is kept in localStorage (never a seed); game progress comes from the server.
-import { mapState, layout, tracePath, levelKind } from "./mapstate.js";
+// Only UI position is kept in localStorage (never a seed); game progress comes from the server,
+// from the player's OWN world, keyed by their wallet address (?world=<address>).
+import { mapState, ringLayout, ringArc, levelKind } from "./mapstate.js";
+import { diagram } from "./diagrams.js";
 import * as W from "./level0.js";
 
 const $ = (id) => document.getElementById(id);
@@ -30,12 +32,16 @@ const link = (href, text) => el("a", { href, target: "_blank", rel: "noopener" }
 // ---- UI state (localStorage: step positions, explainers read, Level 0 done; never seeds) ----
 const UI_KEY = "dch-ui-v2";
 const ui = (() => {
-  try { const j = JSON.parse(localStorage.getItem(UI_KEY) || "{}"); return { step: j.step || {}, read: j.read || [], walletDone: !!j.walletDone }; }
-  catch { return { step: {}, read: [], walletDone: false }; }
+  try { const j = JSON.parse(localStorage.getItem(UI_KEY) || "{}"); return { step: j.step || {}, read: j.read || [] }; }
+  catch { return { step: {}, read: [] }; }
 })();
-const saveUi = () => localStorage.setItem(UI_KEY, JSON.stringify({ step: ui.step, read: ui.read, walletDone: ui.walletDone }));
-const me = () => (localStorage.getItem("dch-player") || "").trim() || null;
-const setMe = (v) => localStorage.setItem("dch-player", v.trim());
+const saveUi = () => localStorage.setItem(UI_KEY, JSON.stringify({ step: ui.step, read: ui.read }));
+/** Seat label inside your own world. */
+const me = () => (localStorage.getItem("dch-player") || "").trim() || "you";
+const addr = () => W.currentAddress();
+const wq = () => (addr() ? `?world=${encodeURIComponent(addr())}` : "");
+/** Level 0 is done once your world exists and a seat in it is linked to your wallet. */
+const walletDone = () => !!state?.world && !!addr() && Object.values(state.seats).some((x) => x.wallet === addr());
 
 let state = null;
 let busy = null; // label while a ledger action runs
@@ -51,9 +57,9 @@ async function api(path, body) {
   return j;
 }
 async function refresh() {
-  state = await api("/api/state");
-  const mine = Object.values(state.seats).find((s) => s.player && s.player === me());
-  if (mine?.wallet && !ui.walletDone) { ui.walletDone = true; saveUi(); }
+  state = await api("/api/state" + wq());
+  // No address yet: show a fresh circuit, never another world's progress.
+  if (!addr()) state = { ...state, world: 0, score: 0, levels: state.levels.map((l) => ({ ...l, score: { goal: false, shouldFail: false } })) };
   render();
 }
 async function act(label, fn) {
@@ -119,63 +125,92 @@ const pointer = {
     if (!this.target || !this.target.isConnected) { p.style.display = "none"; return; }
     const r = this.target.getBoundingClientRect();
     p.style.display = "block";
-    if (r.left > 60 && r.width < innerWidth * 0.6) { // room on the left: point right at it
+    const pw = p.offsetWidth || 40, ph = p.offsetHeight || 48;
+    const top = `${Math.round(r.top + scrollY + r.height / 2 - ph / 2)}px`;
+    if (r.left > pw + 20 && r.width < innerWidth * 0.6) { // room on the left: point right at it
       p.className = "side";
-      p.style.left = `${Math.round(r.left + scrollX - 54)}px`;
-      p.style.top = `${Math.round(r.top + scrollY + r.height / 2 - 24)}px`;
+      p.style.left = `${Math.round(r.left + scrollX - pw - 12)}px`;
+      p.style.top = top;
       return;
     }
-    const above = r.top > 110;
-    p.className = above ? "" : "up";
-    p.style.left = `${Math.round(r.left + scrollX + r.width / 2 - 20)}px`;
-    p.style.top = `${Math.round(above ? r.top + scrollY - 54 : r.bottom + scrollY + 6)}px`;
+    // Narrow screens: the arrow sits at the target's inner right edge, pointing left, so it never
+    // covers text above the target or a neighbouring button (targets are full-width there).
+    p.className = "side-r";
+    p.style.left = `${Math.round(r.right - pw - 6 + scrollX)}px`;
+    p.style.top = top;
   },
 };
-addEventListener("resize", () => { pointer.place(); if (route().name === "map") render(); });
+addEventListener("resize", () => pointer.place());
 
-// ---- home: the circuit map ----
+// ---- home: the circuit board (switches on a ring around the core chip) ----
 function mapScreen() {
-  const ms = mapState(state.levels, { walletDone: ui.walletDone, read: ui.read });
-  const cols = innerWidth >= 700 ? 3 : 2;
-  const L = layout(ms.nodes.length, cols);
-  const P = (slot) => L.pos(slot);
+  const ms = mapState(state.levels, { walletDone: walletDone(), read: ui.read });
+  const N = ms.nodes.length;
+  const L = ringLayout(N);
   const g = [];
+  // board: green PCB with a via grid and a copper edge
+  g.push(svg("defs", {},
+    svg("pattern", { id: "vias", width: 22, height: 22, patternUnits: "userSpaceOnUse" }, svg("circle", { cx: 11, cy: 11, r: 1.4, class: "via" })),
+    svg("radialGradient", { id: "coreglow" }, svg("stop", { offset: "0%", "stop-color": "#fff6c9" }), svg("stop", { offset: "100%", "stop-color": "#ffd34d", "stop-opacity": "0" }))));
+  g.push(svg("rect", { class: "board", x: 4, y: 4, width: L.w - 8, height: L.h - 8, rx: 26 }));
+  g.push(svg("rect", { class: "board-grid", x: 4, y: 4, width: L.w - 8, height: L.h - 8, rx: 26, fill: "url(#vias)" }));
+  for (const [x, y] of [[24, 24], [L.w - 24, 24], [24, L.h - 24], [L.w - 24, L.h - 24]]) g.push(svg("circle", { class: "mount", cx: x, cy: y, r: 8 }));
+  // spokes: core -> each switch (lit when that level is done)
+  ms.nodes.forEach((nd, i) => {
+    const p = L.pos(i), k = 0.42;
+    const sx = L.cx + (p.x - L.cx) * k, sy = L.cy + (p.y - L.cy) * k;
+    g.push(svg("path", { class: "spoke" + (nd.closed || (i === 0) ? " lit" : ""), d: `M${sx.toFixed(1)} ${sy.toFixed(1)} L${p.x.toFixed(1)} ${p.y.toFixed(1)}` }));
+  });
+  // ring traces: node i-1 -> i lit when power reaches i; the closing arc lights on completion
   ms.traces.forEach((t, i) => {
-    const d = tracePath(P(i - 1), P(i));
+    if (i === 0) return; // power enters at Level 0 through its spoke
+    const d = i < N ? ringArc(L, i - 1, i) : ringArc(L, N - 1, 0);
     g.push(svg("path", { class: "trace" + (t.lit ? " lit" : ""), d }));
     if (t.lit) g.push(svg("path", { class: "flow", d }));
   });
-  const pw = P(-1);
-  g.push(svg("g", { class: "power", transform: `translate(${pw.x} ${pw.y})` },
-    svg("circle", { r: 26 }), svg("path", { d: "M3 -16 L-9 3 H0 L-3 16 L9 -3 H0 Z", fill: "#ffd34d" }),
-    svg("title", {}, "Power")));
-  const lp = P(ms.nodes.length);
-  g.push(svg("g", { class: "lamp", transform: `translate(${lp.x} ${lp.y})` },
-    svg("circle", { r: 30 }), svg("text", { y: 7 }, ms.allComplete ? "✓" : "★"), svg("title", {}, "Circuit complete lamp")));
-  let currentNode = null;
-  for (const [i, n] of ms.nodes.entries()) {
-    const { x, y } = P(i);
-    const statusText = { done: "complete", current: n.partial ? "in progress" : "next", locked: "locked", soon: "coming soon on this network" }[n.status];
+  // core chip with pins
+  const cs = 104, cx0 = L.cx - cs / 2, cy0 = L.cy - cs / 2;
+  const pins = [];
+  for (let k = 0; k < 6; k++) {
+    const o = 14 + k * 15.2;
+    pins.push(svg("rect", { class: "pin", x: cx0 + o, y: cy0 - 9, width: 6, height: 9 }), svg("rect", { class: "pin", x: cx0 + o, y: cy0 + cs, width: 6, height: 9 }),
+      svg("rect", { class: "pin", x: cx0 - 9, y: cy0 + o, width: 9, height: 6 }), svg("rect", { class: "pin", x: cx0 + cs, y: cy0 + o, width: 9, height: 6 }));
+  }
+  g.push(svg("g", { class: "core" + (ms.allComplete ? " on" : "") },
+    ms.allComplete ? svg("circle", { cx: L.cx, cy: L.cy, r: 92, fill: "url(#coreglow)", class: "corehalo" }) : null,
+    ...pins,
+    svg("rect", { class: "chip", x: cx0, y: cy0, width: cs, height: cs, rx: 10 }),
+    svg("circle", { class: "chipdot", cx: cx0 + 14, cy: cy0 + 14, r: 4 }),
+    svg("text", { class: "chiplabel", x: L.cx, y: L.cy - 12 }, "DCH CORE"),
+    svg("text", { class: "chipcount", x: L.cx, y: L.cy + 16 }, `${ms.doneCount}/${ms.total}`),
+    svg("text", { class: "chipsub", x: L.cx, y: L.cy + 34 }, ms.allComplete ? "POWERED" : "switches"),
+    svg("title", {}, `Core chip: ${ms.doneCount} of ${ms.total} switches closed`)));
+  // switches on the ring
+  for (const [i, nd] of ms.nodes.entries()) {
+    const { x, y, a } = L.pos(i);
+    const lab = L.label(i);
+    const statusText = { done: "complete", current: nd.partial ? "in progress" : "next", locked: "locked", soon: "coming soon on this network" }[nd.status];
     const open = () => {
-      if (n.status === "locked") { $("hint").textContent = `Locked. Close the ${ms.nodes.find((z) => z.id === ms.current)?.short || "current"} switch first.`; return; }
-      go(`#/level/${n.id}`);
+      if (nd.status === "locked") { $("hint").textContent = `Locked. Close the ${ms.nodes.find((z) => z.id === ms.current)?.short || "current"} switch first.`; return; }
+      go(`#/level/${nd.id}`);
     };
-    const node = svg("g", {
-      class: `node ${n.status}`, transform: `translate(${x} ${y})`, tabindex: n.status === "locked" ? "-1" : "0", role: "button",
-      "aria-label": `Level ${n.n}: ${n.short}, ${statusText}`, "data-pt": `node-${n.id}`,
+    const deg = (a * 180) / Math.PI + 90; // lever runs along the ring
+    g.push(svg("g", {
+      class: `node ${nd.status}`, tabindex: nd.status === "locked" ? "-1" : "0", role: "button",
+      "aria-label": `Level ${nd.n}: ${nd.short}, ${statusText}`, "data-pt": `node-${nd.id}`,
       on: { click: open, keydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } } },
     },
-      svg("circle", { class: "ring", r: 46 }),
-      svg("rect", { class: "pad", x: -62, y: -40, width: 124, height: 80, rx: 14 }),
-      svg("text", { class: "num", y: -24 }, `LEVEL ${n.n}`),
-      svg("circle", { class: "contact", cx: -24, cy: 2, r: 6 }),
-      svg("circle", { class: "contact", cx: 24, cy: 2, r: 6 }),
-      svg("line", { class: "lever", x1: -24, y1: 2, x2: 24, y2: 2, transform: n.closed ? null : "rotate(-24 -24 2)" }),
-      n.partial ? svg("circle", { class: "partial", cx: 50, cy: -28, r: 6 }) : null,
-      svg("text", { y: 32 }, n.short),
-      svg("title", {}, `Level ${n.n}: ${n.title} (${statusText})`));
-    if (n.id === ms.current) currentNode = node;
-    g.push(node);
+      svg("circle", { class: "ring", cx: x, cy: y, r: 30 }),
+      svg("circle", { class: "pad", cx: x, cy: y, r: 25 }),
+      svg("g", { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${deg.toFixed(1)})` },
+        svg("circle", { class: "contact", cx: -11, cy: 0, r: 4 }),
+        svg("circle", { class: "contact", cx: 11, cy: 0, r: 4 }),
+        svg("line", { class: "lever", x1: -11, y1: 0, x2: 11, y2: 0, transform: nd.closed ? null : "rotate(-30 -11 0)" })),
+      nd.partial ? svg("circle", { class: "partial", cx: x + 18, cy: y - 18, r: 5 }) : null,
+      svg("circle", { class: "tag", cx: L.badge(i).x, cy: L.badge(i).y, r: 8 }),
+      svg("text", { class: "tagnum", x: L.badge(i).x, y: L.badge(i).y + 3.5, "text-anchor": "middle" }, String(nd.n)),
+      svg("text", { class: "lab", x: lab.x, y: lab.y, "text-anchor": lab.anchor }, nd.short),
+      svg("title", {}, `Level ${nd.n}: ${nd.title} (${statusText})`)));
   }
   const map = svg("svg", { class: "circuit" + (ms.allComplete ? " complete" : ""), viewBox: `0 0 ${L.w} ${L.h}`, role: "group", "aria-label": `Level map: ${ms.doneCount} of ${ms.total} switches closed` }, g);
   const cur = ms.nodes.find((z) => z.id === ms.current);
@@ -184,9 +219,9 @@ function mapScreen() {
     fresh ? "Start" : `Continue: Level ${cur.n} · ${cur.short}`) : null;
   const nodes = [
     el("div", { class: "maphead" },
-      el("div", {}, el("h1", {}, "Your circuit"), el("p", {}, `${ms.doneCount} of ${ms.total} switches closed. Each level you finish closes a switch.`)),
+      el("div", {}, el("h1", {}, "Your circuit"), el("p", {}, ms.allComplete ? "All switches closed. The core is powered." : `${ms.doneCount} of ${ms.total} switches closed. Close them all to power the core.`)),
       startBtn),
-    ms.allComplete ? el("div", { class: "banner", role: "status" }, "Circuit complete! Every level is done. Tap any switch to replay it.") : null,
+    ms.allComplete ? el("div", { class: "banner", role: "status" }, "Circuit complete! The core is powered. Tap any switch to replay it.") : null,
     map,
   ];
   return {
@@ -217,7 +252,7 @@ function levelScreen(id) {
     el("div", { class: "crumbs" }, el("span", {}, `Level ${l.n} · ${l.title}`),
       el("div", { class: "dots", "aria-label": `Step ${idx + 1} of ${cards.length}` }, cards.map((_, i) => el("span", { class: "dot" + (i === idx ? " on" : i < idx ? " past" : "") })))),
     el("section", { class: "card", "aria-labelledby": "cardtitle" },
-      el("h2", { id: "cardtitle" }, c.title), ...c.body, more),
+      el("h2", { id: "cardtitle" }, c.title), c.diag ? diagram(c.diag) : null, ...c.body, more),
     el("div", { class: "navrow" }, back, next),
   ];
   const target = busy ? null : c.target && c.target() ? c.target() : next;
@@ -246,7 +281,7 @@ function nextLevelAfter(l) {
 function finishCard(l, title, lead) {
   const nx = nextLevelAfter(l);
   return {
-    title, body: [el("p", { class: "lead" }, lead)], more: false,
+    title, body: [el("p", { class: "lead" }, lead)], more: false, diag: "done",
     nextLabel: nx ? `Level ${nx.n} →` : "Back to the map",
     nextHint: nx ? `Next: Level ${nx.n}. Press the button.` : "Back to your circuit.",
     next: () => { if (nx) { ui.step[nx.id] = ui.step[nx.id] || 0; saveUi(); go(`#/level/${nx.id}`); } else go("#/map"); },
@@ -260,7 +295,7 @@ function cardsFor(l) {
   const kind = levelKind(l);
   if (kind === "onboarding") return walletCards(l);
   if (kind === "explainer") {
-    const parts = (l.explainer || []).map((t, i) => ({ title: i === 0 ? l.title.replace(/^Explainer:\s*/i, "") : `Part ${i + 1}`, body: [el("p", { class: "lead" }, t)], more: i === 0 ? undefined : false }));
+    const parts = (l.explainer || []).map((t, i) => ({ title: i === 0 ? l.title.replace(/^Explainer:\s*/i, "") : `Part ${i + 1}`, body: [el("p", { class: "lead" }, t)], more: i === 0 ? undefined : false, diag: `${l.id}:p${i}` }));
     const done = finishCard(l, "Explainer read ✓", "That switch is closed. Back to your circuit.");
     const nextFn = done.next;
     done.next = () => { if (!ui.read.includes(l.id)) ui.read.push(l.id); saveUi(); nextFn(); };
@@ -273,23 +308,16 @@ function cardsFor(l) {
 
 function seatChips(roles) {
   const name = me();
+  const world = addr();
   return el("div", { class: "chips" }, roles.map((role) => {
     const s = state.seats[role];
     const mine = s.player && s.player === name;
-    if (mine) return el("button", { class: "chip mine", "data-pt": `leave-${role}`, on: { click: () => act("seat", () => api("/api/seat/release", { role, player: name })) } }, `✓ You: ${role} (leave)`);
+    if (mine) return el("button", { class: "chip mine", "data-pt": `leave-${role}`, on: { click: () => act("seat", () => api("/api/seat/release", { role, player: name, world })) } }, `✓ You: ${role} (leave)`);
     if (s.player) return el("button", { class: "chip", disabled: true }, `${role}: ${s.player}`);
-    return el("button", { class: "chip", "data-pt": `claim-${role}`, ...(name && !busy ? {} : { disabled: true }), on: { click: () => act("seat", async () => {
-      W.currentAddress() ? await W.claimWithWallet(role, name) : await api("/api/seat/claim", { role, player: name });
+    return el("button", { class: "chip", "data-pt": `claim-${role}`, ...(world && state.world && !busy ? {} : { disabled: true }), on: { click: () => act("seat", async () => {
+      try { await W.claimWithWallet(role, name); } catch (e) { alert(e.message); }
     }) } }, `Play ${role}`);
   }));
-}
-function nameField() {
-  const input = el("input", { id: "player", maxlength: "32", placeholder: "Your name, e.g. ada", autocomplete: "nickname", "aria-label": "Your name", "data-pt": "name" });
-  input.value = me() || "";
-  input.addEventListener("input", () => setMe(input.value));
-  input.addEventListener("change", () => { setMe(input.value); render(); });
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { setMe(input.value); input.blur(); render(); } });
-  return input;
 }
 
 function resultBox(r) {
@@ -303,43 +331,38 @@ function resultBox(r) {
 function scoredCards(l) {
   const res = (results[l.id] ||= {});
   const run = (part) => act(part, async () => {
-    try { res[part] = await api(`/api/levels/${l.id}/${part === "goal" ? "goal" : "should-fail"}`, { player: me() }); }
+    try { res[part] = await api(`/api/levels/${l.id}/${part === "goal" ? "goal" : "should-fail"}`, { player: me(), world: addr() }); }
     catch (e) { res[part] = { ok: false, message: "Error: " + e.message }; }
   });
   const waitNote = l.id === "lend" ? "This one waits for the vault's investment phase: about 4 minutes." : "Ledger steps take a few seconds each.";
   const working = (part) => busy === part ? el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), `Working on ${state.network}… ${waitNote}`) : null;
   const roleList = l.goalRoles.join(", ");
 
-  let goalBtn, failBtn, nameIn, firstFree;
+  let goalBtn, failBtn;
+  const noWorld = !addr() || !state.world;
+  const toLevel0 = () => { ui.step.wallet = 4; saveUi(); go("#/level/wallet"); };
   const cards = [
-    { title: l.title, body: [el("p", { class: "lead" }, l.goal)], moreText: [l.bots, l.priority ? "Education Month priority level." : null].filter(Boolean) },
+    { title: l.title, diag: `${l.id}:goal`, body: [el("p", { class: "lead" }, l.goal)], moreText: [l.bots, l.priority ? "Education Month priority level." : null].filter(Boolean) },
     {
-      title: "Pick a seat (optional)",
-      body: (() => {
-        const kids = [el("p", { class: "lead" }, `Seats in this level: ${roleList}. Bots play any seat you leave open.`)];
-        if (!me()) { nameIn = nameField(); kids.push(el("div", { class: "act" }, nameIn)); }
-        const chips = seatChips(l.goalRoles);
-        firstFree = chips.querySelector("button:not(:disabled):not(.mine)");
-        kids.push(chips);
-        return kids;
-      })(),
+      title: "Pick a seat (optional)", diag: "seat",
+      body: [el("p", { class: "lead" }, `Seats in this level: ${roleList}. Bots play any seat you leave open.`), noWorld ? null : seatChips(l.goalRoles)],
       more: false,
-      target: () => (!me() ? nameIn : null),
-      hint: "Type your name, or press Next to let bots play.",
     },
     {
-      title: l.score.goal ? "Goal done ✓" : "Do it",
+      title: l.score.goal ? "Goal done ✓" : noWorld ? "Build your world first" : "Do it",
       body: [
-        el("p", { class: "lead" }, l.score.goal ? "This world already cleared the goal." : `Run the goal on ${state.network}. +10 points.`),
-        el("div", { class: "act" }, goalBtn = el("button", { class: "primary big", "data-pt": "run-goal", ...(busy || !state.world || l.score.goal ? { disabled: true } : {}), on: { click: () => run("goal") } }, "Run level")),
+        el("p", { class: "lead" }, l.score.goal ? "Your world already cleared the goal." : noWorld ? "Levels run in your own world. Build it in Level 0." : `Run the goal on ${state.network}. +10 points.`),
+        el("div", { class: "act" }, goalBtn = noWorld
+          ? el("button", { class: "primary big", "data-pt": "to-l0", on: { click: toLevel0 } }, "Go to Level 0")
+          : el("button", { class: "primary big", "data-pt": "run-goal", ...(busy || l.score.goal ? { disabled: true } : {}), on: { click: () => run("goal") } }, "Run level")),
         working("goal"), resultBox(res.goal),
       ],
       more: false,
       target: () => (!l.score.goal && !busy ? goalBtn : null),
-      hint: "Press Run level.",
+      hint: noWorld ? "Build your world in Level 0 first." : "Press Run level.",
     },
     {
-      title: l.score.shouldFail ? "Broken on purpose ✓" : "Now break it",
+      title: l.score.shouldFail ? "Broken on purpose ✓" : "Now break it", diag: `${l.id}:fail`,
       body: [
         el("p", { class: "lead" }, l.shouldFail),
         el("div", { class: "act" }, failBtn = el("button", { class: "primary big", "data-pt": "run-fail", ...(busy || !state.world || l.score.shouldFail ? { disabled: true } : {}), on: { click: () => run("shouldFail") } }, "Try it (+5)")),
@@ -361,8 +384,12 @@ function walletCards(l) {
   const net = state.network;
   const address = W.currentAddress();
   const funded = !!l0.bal?.funded;
-  const mySeat = Object.values(state.seats).find((s) => s.player && s.player === me());
-  let genBtn, fundBtn, nameIn, firstSeat;
+  const mySeat = Object.values(state.seats).find((s) => s.wallet && s.wallet === address);
+  let genBtn, fundBtn, firstSeat, worldBtn;
+  const startMyWorld = () => act("world", async () => {
+    l0.worldMsg = "";
+    try { await api("/api/world/start", { world: address }); } catch (e) { l0.worldMsg = e.message; }
+  });
   const doFund = () => act("fund", async () => {
     l0.msg = `Asking the ${net} faucet…`;
     try { l0.bal = await W.fund(state.faucetHost, (m) => { l0.msg = m; render(); }); l0.msg = l0.bal?.funded ? `Funded: ${l0.bal.balanceXrp} test XRP on ${net}.` : "Not on the ledger yet. Wait a moment and try again."; }
@@ -370,15 +397,15 @@ function walletCards(l) {
   });
   return [
     {
-      title: `What is ${net}?`,
-      body: [el("p", { class: "lead" }, `A public XRP Ledger test network. Its XRP is free and has no value.`), el("p", { class: "note" }, "It can be reset at any time, which wipes accounts.")],
+      title: `What is ${net}?`, diag: "wallet:devnet",
+      body: [],
       moreText: (l.explainer || []).map(fill),
     },
     {
-      title: "Make your wallet",
+      title: "Make your wallet", diag: "wallet:wallet",
       body: [
         el("p", { class: "lead" }, "Your browser makes a key pair. The secret (seed) never leaves this page."),
-        el("div", { class: "act" }, genBtn = el("button", { class: "primary big", "data-pt": "gen", on: { click: () => { try { W.generateWallet(); l0.bal = null; l0.seedShown = false; l0.msg = ""; } catch (e) { l0.msg = e.message; } render(); } } }, address ? "Make a new one" : "Generate wallet")),
+        el("div", { class: "act" }, genBtn = el("button", { class: "primary big", "data-pt": "gen", on: { click: () => { try { W.generateWallet(); l0.bal = null; l0.seedShown = false; l0.msg = ""; l0.worldMsg = ""; } catch (e) { l0.msg = e.message; } refresh().catch(() => render()); } } }, address ? "Make a new one" : "Generate wallet")),
         address ? el("p", {}, "Address: ", el("code", {}, address)) : null,
       ],
       more: false,
@@ -386,7 +413,7 @@ function walletCards(l) {
       hint: "Press Generate wallet.",
     },
     {
-      title: "Save your seed",
+      title: "Save your seed", diag: "wallet:seed",
       body: W.hasSeedInMemory() ? [
         el("div", { class: "warnbox" }, "Test-only. Never reuse a test seed on mainnet. Reloading this page forgets it."),
         el("div", { class: "act" }, el("code", { class: "seed" }, l0.seedShown ? W.revealSeed() : "•••••••••••••"),
@@ -395,9 +422,9 @@ function walletCards(l) {
       more: false,
     },
     {
-      title: "Fund it",
+      title: "Fund it", diag: "wallet:fund",
       body: [
-        el("p", { class: "lead" }, "The faucet sends free test XRP, so your account exists on the ledger."),
+        el("p", { class: "lead" }, "Ask the faucet for free test XRP."),
         el("div", { class: "act" }, fundBtn = el("button", { class: "primary big", "data-pt": "fund", ...(address && !busy ? {} : { disabled: true }), on: { click: doFund } }, funded ? "Fund again" : "Fund from faucet"),
           el("button", { ...(address && !busy ? {} : { disabled: true }), on: { click: () => act("bal", async () => { try { l0.bal = await W.balance(); l0.msg = l0.bal.funded ? `Live: ${l0.bal.balanceXrp} test XRP.` : "Not funded yet."; } catch (e) { l0.msg = e.message; } }) } }, "Check balance")),
         busy === "fund" ? el("p", { class: "result" }, el("span", { class: "spinner", "aria-hidden": "true" }), l0.msg) : l0.msg ? el("p", { class: "result " + (funded ? "ok" : ""), role: "status" }, l0.msg) : null,
@@ -406,26 +433,36 @@ function walletCards(l) {
       target: () => (address && !funded && !busy ? fundBtn : null),
       hint: "Press Fund from faucet.",
     },
-    {
-      title: mySeat?.wallet ? "Seat claimed ✓" : "Claim a seat",
+    state.world ? {
+      title: mySeat?.wallet ? "Seat claimed ✓" : "Claim a seat", diag: "wallet:seat",
       body: (() => {
-        const kids = [el("p", { class: "lead" }, mySeat?.wallet ? `You play ${mySeat.role} with your wallet.` : "Your address replaces a bot in one seat.")];
-        nameIn = nameField();
-        kids.push(el("div", { class: "act" }, nameIn));
+        const kids = [el("p", { class: "lead" }, mySeat?.wallet ? `You play ${mySeat.role} with your wallet.` : "Your address replaces a bot in one seat of your world.")];
         const chips = seatChips(Object.keys(state.seats));
         firstSeat = chips.querySelector("button:not(:disabled):not(.mine)");
-        if (address) kids.push(chips); else kids.push(el("p", { class: "note" }, "Make and fund a wallet first."));
+        kids.push(chips);
         return kids;
       })(),
       more: false,
-      target: () => (mySeat?.wallet ? null : !me() ? nameIn : address ? firstSeat : null),
-      hint: !me() ? "Type your name, then press Enter." : "Pick a seat.",
+      target: () => (mySeat?.wallet ? null : firstSeat),
+      hint: "Pick a seat.",
+    } : {
+      title: "Build your world", diag: "wallet:world",
+      body: [
+        el("p", { class: "lead" }, "Your progress and seats are yours alone."),
+        el("div", { class: "act" }, worldBtn = el("button", { class: "primary big", "data-pt": "start-world", ...(address && !busy ? {} : { disabled: true }), on: { click: startMyWorld } }, "Start my world")),
+        busy === "world" ? el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), "Funding 6 test accounts from the faucet… about 30 seconds.") : null,
+        l0.worldMsg ? el("p", { class: "result bad", role: "status" }, l0.worldMsg) : null,
+        address ? null : el("p", { class: "note" }, "Make a wallet first: your world is keyed by its address."),
+      ],
+      more: false,
+      target: () => (address && !busy ? worldBtn : null),
+      hint: "Press Start my world.",
     },
-    finishCard(l, ui.walletDone ? "Wallet ready ✓" : "Wallet step", ui.walletDone ? "Switch closed. Level 1 is next." : "Claim a seat with your wallet to close this switch."),
+    finishCard(l, walletDone() ? "Wallet ready ✓" : "Wallet step", walletDone() ? "Switch closed. Level 1 is next." : "Build your world and claim a seat with your wallet to close this switch."),
   ];
 }
 
-// ---- tools: network check, recent results, objects, reset ----
+// ---- tools: network check, recent results, objects, restart my world ----
 function toolsScreen() {
   const s = state, a = s.amendments;
   const objs = el("div", {});
@@ -445,14 +482,17 @@ function toolsScreen() {
       el("button", { on: { click: async () => {
         objs.textContent = "Loading…";
         try {
-          const o = await api("/api/objects");
+          const o = await api("/api/objects" + wq());
           objs.replaceChildren(o.objects.length ? el("table", {}, el("tr", {}, ...["Owner", "Type", "Detail", "ID"].map((h) => el("th", {}, h))),
             o.objects.map((x) => el("tr", {}, el("td", {}, x.owner), el("td", {}, x.type), el("td", {}, x.detail), el("td", {}, x.id.slice(0, 12) + "…")))) : el("p", {}, "No objects yet."));
         } catch (e) { objs.textContent = "Error: " + e.message; }
       } } }, "Load objects"), objs),
     el("div", { class: "panel" }, el("h2", {}, "World"),
-      el("p", {}, `World ${s.world || "none yet"} on ${s.network}. Start over with `, el("code", {}, "npm run dch -- reset-world"), "."),
-      el("button", { title: "Needs DCH_ALLOW_HTTP_RESET=1 on the server", ...(busy ? { disabled: true } : {}), on: { click: () => act("reset", async () => { try { await api("/api/reset-world", {}); } catch (e) { alert(e.message); } }) } }, "Reset world")),
+      el("p", {}, s.owner ? `Your world #${s.world} on ${s.network}, keyed by ${s.owner.slice(0, 8)}…` : `No world of your own yet. Build it in Level 0.`),
+      s.owner && s.world ? el("button", { ...(busy ? { disabled: true } : {}), on: { click: () => {
+        if (!confirm("Start over with a fresh world? Your progress in this world is cleared.")) return;
+        act("reset", async () => { try { await api("/api/world/start", { world: addr(), fresh: true }); for (const k of Object.keys(results)) delete results[k]; } catch (e) { alert(e.message); } });
+      } } }, "Restart my world") : null),
   ];
   return { nodes, target: null, hint: "" };
 }

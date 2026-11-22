@@ -74,9 +74,13 @@ levels 6–7 show coming soon. A full devnet run scored 140/140 — see
 - **Guided pointer.** A flashing arrow and a glow ring point at the one thing to press next
   (Start, Generate wallet, Fund from faucet, a seat, Run level, Next…). The hint is announced
   to screen readers and focus moves to the target. With "reduce motion" on, it stays steady.
+- **One world per player.** In Level 0 each player makes a wallet in the browser, then presses
+  **Start my world**: the server funds a fresh set of test accounts keyed by that wallet's
+  address, so seats, scores and the circuit are that player's alone. The server only ever sees
+  the address (validated as a classic address), never a seed.
 - **What's saved in the browser:** the step you're on per level, which explainers you've read,
-  whether Level 0 is done, your name and your wallet *address*. Never a seed. Game progress
-  (scores, seats) comes from the server.
+  and your wallet *address*. Never a seed. Game progress (scores, seats) comes from your world
+  on the server.
 
 ### Level 0: get your devnet wallet
 

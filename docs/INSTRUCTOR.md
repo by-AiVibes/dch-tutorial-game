@@ -16,7 +16,11 @@ A 45–60 minute session for developers who know basic XRPL concepts (accounts, 
 
 ## Running it
 
-- Start with **Level 0** on the dashboard: everyone creates a devnet wallet in their own browser,
+- The home screen is the circuit map; players press **Start** and follow the flashing arrow.
+  Scores and seats are shared by the world, so a level cleared by one player closes that switch
+  for everyone (a fresh `reset-world` starts the circuit over). The Tools tab has the network
+  check, recent results, ledger objects and reset.
+- Start with **Level 0**: everyone creates a devnet wallet in their own browser,
   funds it from the faucet, checks the balance, and claims a seat with it. Stress the warning:
   save the seed, it's test-only, never reuse a test seed on mainnet.
 

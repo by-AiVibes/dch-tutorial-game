@@ -62,6 +62,22 @@ levels 6–7 show coming soon. A full devnet run scored 140/140 — see
 | 7 | Fund a loan and repay it | SingleAssetVault + LendingProtocol | **playable** where enabled (devnet), priority |
 | 8 | Explainer: confidential MPT transfers | ConfidentialTransfer | **priority**, read-only explainer (interactive steps planned) |
 
+### How the UI works
+
+- **Home is a circuit board.** Each level is a switch. Finishing a level closes its switch and
+  lights the trace to the next one; the current level pulses and later levels are dim. When
+  every switch is closed, the lamp at the end lights up. Levels whose amendment is off on the
+  network show "coming soon" and are bypassed. **Map** is in the top bar on every screen.
+- **Short step cards.** Each level is a few small cards (one idea each) with big Back / Next
+  buttons; ← / → and Enter work too, Esc goes to the map. Deeper text and the xrpl.org links
+  sit behind **Learn more**.
+- **Guided pointer.** A flashing arrow and a glow ring point at the one thing to press next
+  (Start, Generate wallet, Fund from faucet, a seat, Run level, Next…). The hint is announced
+  to screen readers and focus moves to the target. With "reduce motion" on, it stays steady.
+- **What's saved in the browser:** the step you're on per level, which explainers you've read,
+  whether Level 0 is done, your name and your wallet *address*. Never a seed. Game progress
+  (scores, seats) comes from the server.
+
 ### Level 0: get your devnet wallet
 
 A guided, unscored start (the 140-point total is unchanged). It explains what devnet is (free
@@ -178,7 +194,8 @@ src/store.ts        world state file (secrets stay server-side)
 src/game.ts         engine: reset-world, play, serialized operations
 src/levels/         level definitions
 src/server.ts       JSON API + static dashboard (no framework)
-public/             dashboard (vanilla JS)
+public/             UI (vanilla JS/CSS/SVG): circuit level map, step cards, guided pointer
+  mapstate.js       pure map logic (which switches are closed), shared with the tests
 test/               fast unit tests
 ```
 

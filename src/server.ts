@@ -8,6 +8,8 @@ import { loadConfig } from "./config.ts";
 import { Game } from "./game.ts";
 import { AWARD_ID_RE, awardHtml, awardPng, loadAward, publicBase } from "./award.ts";
 import { assertNoSecrets, cleanAddress } from "./secrets.ts";
+import { JobStore, JobStore as Jobs } from "./jobs.ts";
+import { SCORED_LEVELS } from "./levels/index.ts";
 import { BusyError, CapError, classify, clientIp, RateLimiter, rulesFromEnv } from "./limits.ts";
 
 const PORT = Number(process.env.PORT || 8790);
@@ -53,7 +55,7 @@ const VENDOR: Record<string, string> = {
   "/vendor/xrpl.js": join(import.meta.dirname, "..", "node_modules", "xrpl", "build", "xrpl-latest-min.js"),
 };
 
-export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv()), trustProxy = process.env.TRUST_PROXY === "1") {
+export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv()), trustProxy = process.env.TRUST_PROXY === "1", jobs = new JobStore()) {
   return (req: IncomingMessage, res: ServerResponse) => {
     let path = "/";
     try {
@@ -67,13 +69,13 @@ export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv
       res.writeHead(429, { "content-type": "application/json", "retry-after": String(wait), "cache-control": "no-store" });
       return res.end(JSON.stringify({ error: "rate_limited", retryAfterSeconds: wait }));
     }
-    handle(game, req, res, trustProxy).catch((e) =>
+    handle(game, req, res, trustProxy, jobs).catch((e) =>
       e instanceof BusyError ? sendBusy(res, e.message) : e instanceof CapError ? sendCap(res, e) : send(res, 400, { error: e instanceof Error ? e.message : String(e) }),
     );
   };
 }
 
-async function handle(game: Game, req: IncomingMessage, res: ServerResponse, trustProxy = false) {
+async function handle(game: Game, req: IncomingMessage, res: ServerResponse, trustProxy = false, jobs = new JobStore()) {
   let url: URL;
   try {
     url = new URL(req.url ?? "/", "http://localhost");
@@ -95,6 +97,12 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
   if (req.method === "GET" && p === "/api/objects") {
     const k = qWorld();
     return send(res, 200, k === null && !SHARED_WORLD_HTTP() ? { network: game.cfg.name, world: 0, objects: [] } : await game.objects(k));
+  }
+  // Background level run status (see jobs.ts). Unknown or expired ids are 404.
+  const jm = /^\/api\/jobs\/([^/]+)$/.exec(p);
+  if (req.method === "GET" && jm) {
+    const j = jobs.get(jm[1]);
+    return j ? send(res, 200, Jobs.view(j)) : send(res, 404, { error: "That run isn't known any more. Reload to see your score." });
   }
   const acct = /^\/api\/account\/([^/]+)$/.exec(p);
   if (req.method === "GET" && acct) {
@@ -143,7 +151,18 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
       return send(res, 200, await game.resetWorld());
     }
     const m = /^\/api\/levels\/([a-z]+)\/(goal|should-fail)$/.exec(p);
-    if (m) return sharedOk ? send(res, 200, await game.play(m[1], m[2] === "goal" ? "goal" : "shouldFail", player, key)) : sharedOff();
+    if (m) {
+      if (!sharedOk) return sharedOff();
+      const part = m[2] === "goal" ? "goal" : "shouldFail";
+      const run = () => game.play(m[1], part, player, key);
+      // {"async": true}: answer now with a job id and let the page poll (phones drop long fetches).
+      if (b.async === true) {
+        if (!SCORED_LEVELS.some((l) => l.id === m[1])) return send(res, 400, { error: `unknown level ${m[1]}` });
+        const j = jobs.start(`${key ?? "shared"}|${m[1]}|${part}`, run, (e) => (e instanceof BusyError ? 503 : e instanceof CapError ? 503 : 400));
+        return send(res, 202, Jobs.view(j));
+      }
+      return send(res, 200, await run());
+    }
     return send(res, 404, { error: "not_found" });
   }
   if (req.method === "GET") {

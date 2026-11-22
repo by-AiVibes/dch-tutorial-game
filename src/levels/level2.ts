@@ -18,12 +18,22 @@ async function runGoal(ctx: LevelContext): Promise<StepOutcome> {
   try {
     const claw = await ctx.ensureAccount("clawIssuer");
     const bot = ctx.address("holderBot");
-    await step("clawIssuer", { TransactionType: "AccountSet", SetFlag: AccountSetAsfFlags.asfAllowTrustLineClawback }, "Issuer enables clawback before it has any trust lines");
-    await step("holderBot", { TransactionType: "TrustSet", LimitAmount: { currency: CLW, issuer: claw, value: "1000" }, Flags: TrustSetFlags.tfSetNoRipple }, "holderBot trusts the issuer for CLW");
-    await step("clawIssuer", { TransactionType: "Payment", Destination: bot, Amount: { currency: CLW, issuer: claw, value: "50" } }, "Issuer sends 50 CLW to holderBot");
+    // Resumable: a run that stopped halfway (e.g. a submit timeout) must not lock the player out,
+    // so steps that already happened in this world are skipped instead of retried.
+    const info = await ctx.client.request({ command: "account_info", account: claw, ledger_index: "validated" });
+    const clawbackOn = ((info.result.account_data.Flags ?? 0) & 0x80000000) !== 0; // lsfAllowTrustLineClawback
+    if (clawbackOn) ctx.note("Issuer already enabled clawback in an earlier run (skipped)");
+    else await step("clawIssuer", { TransactionType: "AccountSet", SetFlag: AccountSetAsfFlags.asfAllowTrustLineClawback }, "Issuer enables clawback before it has any trust lines");
+    const lineNow = async () => (await ctx.client.request({ command: "account_lines", account: bot, peer: claw, ledger_index: "validated" })).result.lines.find((l) => l.currency === CLW);
+    const before = await lineNow();
+    if (!before) await step("holderBot", { TransactionType: "TrustSet", LimitAmount: { currency: CLW, issuer: claw, value: "1000" }, Flags: TrustSetFlags.tfSetNoRipple }, "holderBot trusts the issuer for CLW");
+    const held = Number(before?.balance ?? 0);
+    if (held <= 0) await step("clawIssuer", { TransactionType: "Payment", Destination: bot, Amount: { currency: CLW, issuer: claw, value: "50" } }, "Issuer sends 50 CLW to holderBot");
+    else ctx.note(`holderBot already holds ${held} CLW from an earlier run (skipped the payment)`);
     ctx.note("Auditor bot flags holderBot for review");
     await step("clawIssuer", { TransactionType: "TrustSet", LimitAmount: { currency: CLW, issuer: bot, value: "0" }, Flags: TrustSetFlags.tfSetFreeze }, "Issuer freezes holderBot's CLW line");
-    await step("clawIssuer", { TransactionType: "Clawback", Amount: { currency: CLW, issuer: bot, value: "50" } }, "Issuer claws back 50 CLW (Amount.issuer is the holder)");
+    const amt = held > 0 ? String(held) : "50";
+    await step("clawIssuer", { TransactionType: "Clawback", Amount: { currency: CLW, issuer: bot, value: amt } }, `Issuer claws back ${amt} CLW (Amount.issuer is the holder)`);
     const lines = await ctx.client.request({ command: "account_lines", account: bot, peer: claw, ledger_index: "validated" });
     const line = lines.result.lines.find((l) => l.currency === CLW);
     const pass = !!line && line.freeze_peer === true && Number(line.balance) === 0;

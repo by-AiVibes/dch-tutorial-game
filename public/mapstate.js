@@ -117,3 +117,49 @@ export function ringArc(L, i, j) {
   const a = L.pos(i), b = L.pos(j);
   return `M${a.x.toFixed(1)} ${a.y.toFixed(1)} A${L.r} ${L.r} 0 0 1 ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
 }
+
+/**
+ * What is left before this level's switch closes, in play order:
+ * "wallet" (Level 0 world + seat), "goal", "shouldFail", "quiz", or null when the level is done.
+ * The quiz only opens once the steps are done (the server unlocks it then), so a level whose
+ * steps are unfinished never shows its quiz and never lets the player move on.
+ */
+export function levelTodo(l, ctx = {}) {
+  const kind = levelKind(l);
+  if (l.available === false) return null;
+  if (kind === "onboarding" && !ctx.walletDone) return "wallet";
+  if (kind === "scored") {
+    if (!(l.score && l.score.goal)) return "goal";
+    if (!l.score.shouldFail) return "shouldFail";
+  }
+  if (kind === "explainer" && !l.quiz) return ctx.read && new Set(ctx.read).has(l.id) ? null : "read";
+  if (l.quiz && !l.quiz.passed) return "quiz";
+  return null;
+}
+
+/**
+ * May the player open this level? Done, current and coming-soon levels open; a locked level
+ * (an earlier switch is still open) does not, whatever the URL or a stale button says.
+ * Returns { ok, current } where current is the level to send the player to instead.
+ */
+export function canOpen(levels, id, ctx = {}) {
+  const ms = mapState(levels, ctx);
+  const node = ms.nodes.find((x) => x.id === id);
+  return { ok: !!node && node.status !== "locked", current: ms.current };
+}
+
+/**
+ * Card index to show: never past the first card the player can't pass yet (blocked[i] true),
+ * so a saved position or an old bookmark can't land beyond an unfinished step or quiz.
+ */
+export function clampStep(idx, blocked) {
+  const gate = blocked.findIndex(Boolean);
+  const max = blocked.length - 1;
+  const i = Math.min(Math.max(Number.isInteger(idx) ? idx : 0, 0), max);
+  return gate >= 0 && i > gate ? gate : i;
+}
+
+/** Levels whose steps were finished before quizzes existed but whose quiz isn't passed yet. */
+export function quizPending(levels, ctx = {}) {
+  return [...levels].sort((a, b) => a.n - b.n).filter((l) => l.available !== false && levelKind(l) !== "explainer" && l.quiz && !l.quiz.passed && levelTodo(l, ctx) === "quiz");
+}

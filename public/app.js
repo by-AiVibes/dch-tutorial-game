@@ -2,7 +2,7 @@
 // guided pointer at the next thing to click. Uses textContent everywhere (no innerHTML with data).
 // Only UI position is kept in localStorage (never a seed); game progress comes from the server,
 // from the player's OWN world, keyed by their wallet address (?world=<address>).
-import { mapState, ringLayout, ringArc, levelKind } from "./mapstate.js";
+import { mapState, ringLayout, ringArc, levelKind, levelTodo, canOpen, clampStep, quizPending } from "./mapstate.js";
 import { diagram } from "./diagrams.js";
 import * as W from "./level0.js";
 
@@ -49,12 +49,42 @@ const results = {}; // levelId -> { goal, shouldFail } last results this session
 const l0 = { msg: "", bal: null, seedShown: false };
 
 async function api(path, body) {
-  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  let r;
+  try { r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); }
+  catch { throw new NetError(); }
   let j = {};
   try { j = await r.json(); } catch { /* empty */ }
   if (r.status === 429 || r.status === 503) throw new Error(`The server is busy. Try again in ${r.headers.get("retry-after") || "a few"} seconds.`);
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
+}
+/** fetch itself failed (Safari says "Load failed"): the phone lost the connection, not the server. */
+class NetError extends Error { constructor() { super("The connection dropped."); } }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/**
+ * Run a level part as a background job and poll for it. A level can take minutes (Level 7 waits
+ * ~4 minutes); a phone drops one long fetch when the screen locks, so the page asks every few
+ * seconds instead and simply keeps asking after a dropped connection.
+ */
+async function runLevel(id, part, onWait) {
+  const path = `/api/levels/${id}/${part === "goal" ? "goal" : "should-fail"}`;
+  let job, drops = 0;
+  for (;;) {
+    try { job = await api(path, { player: me(), world: addr(), async: true }); break; }
+    catch (e) { if (!(e instanceof NetError) || ++drops > 5) throw e; onWait?.("Connection dropped. Trying again…"); await sleep(3000); }
+  }
+  const t0 = Date.now();
+  while (job.status === "running") {
+    await sleep(3000);
+    try { job = await api(`/api/jobs/${encodeURIComponent(job.job)}`); drops = 0; onWait?.(""); }
+    catch (e) {
+      if (!(e instanceof NetError)) throw e;
+      onWait?.("Connection dropped. Still checking; the ledger keeps working.");
+      if (Date.now() - t0 > 15 * 60_000) throw new Error("Lost touch with the server. Reload the page: your score is saved there.");
+    }
+  }
+  if (job.status === "error") throw new Error(job.error || "That run failed.");
+  return job.result;
 }
 async function refresh() {
   state = await api("/api/state" + wq());
@@ -83,7 +113,7 @@ function render() {
   if (!state) return;
   const r = route();
   const s = state;
-  const seat = Object.values(s.seats).find((x) => x.player && x.player === me());
+  const seat = Object.values(s.seats).find((x) => addr() && x.wallet === addr()) || Object.values(s.seats).find((x) => x.player && x.player === me());
   $("stats").replaceChildren(
     el("span", { class: "pill" }, el("span", { class: "k" }, "Network "), el("b", {}, s.network)),
     el("span", { class: "pill" }, el("span", { class: "k" }, "Score "), el("b", {}, `${s.score}/${s.maxScore}`)),
@@ -135,6 +165,13 @@ const pointer = {
     const r = this.target.getBoundingClientRect();
     p.style.display = "block";
     const pw = p.offsetWidth || 40, ph = p.offsetHeight || 48;
+    if (this.target.classList.contains("choices")) {
+      // A group of answers: point down at its top edge, never beside one answer (that would hint).
+      p.className = "";
+      p.style.left = `${Math.round(r.right - pw - 18 + scrollX)}px`;
+      p.style.top = `${Math.round(r.top + scrollY - ph + 6)}px`;
+      return;
+    }
     const top = `${Math.round(r.top + scrollY + r.height / 2 - ph / 2)}px`;
     if (r.left > pw + 20 && r.width < innerWidth * 0.6) { // room on the left: point right at it
       p.className = "side";
@@ -233,6 +270,13 @@ function mapScreen() {
       el("div", {}, el("h1", {}, "Your circuit"), el("p", {}, ms.allComplete ? "All switches closed. The core is powered." : `${ms.doneCount} of ${ms.total} switches closed. Close them all to power the core.`)),
       startBtn || gradBtn),
     ms.allComplete ? el("div", { class: "banner", role: "status" }, "Circuit complete! The core is powered. Tap any switch to replay it.") : null,
+    (() => {
+      // Worlds that finished steps before quizzes existed: say why those switches are open again.
+      const pend = quizPending(state.levels, { walletDone: walletDone(), read: ui.read });
+      if (!pend.length || ms.allComplete) return null;
+      const names = pend.map((x) => `Level ${x.n}`).join(", ");
+      return el("div", { class: "banner", role: "status" }, `Quiz waiting: ${names}. Your level points are kept; a switch closes once its 3-question quiz is passed.`);
+    })(),
     map,
   ];
   return {
@@ -246,8 +290,12 @@ function mapScreen() {
 function levelScreen(id) {
   const l = state.levels.find((x) => x.id === id);
   if (!l) { go("#/map"); return null; }
+  const ctx = { walletDone: walletDone(), read: ui.read };
+  const gate = canOpen(state.levels, id, ctx);
+  if (!gate.ok) return lockedScreen(l, state.levels.find((x) => x.id === gate.current));
   const cards = cardsFor(l);
-  let idx = Math.min(Math.max(ui.step[id] ?? 0, 0), cards.length - 1);
+  // Never past the first card you can't pass yet (an unrun step or an unanswered quiz question).
+  let idx = clampStep(ui.step[id] ?? 0, cards.map((c) => !!c.nextDisabled));
   const c = cards[idx];
   const isLast = idx === cards.length - 1;
   const setIdx = (i) => { ui.step[id] = i; saveUi(); render(); };
@@ -273,6 +321,21 @@ function levelScreen(id) {
   return { nodes, target, hint: busy ? "Working on the ledger…" : c.target && c.target() ? c.hint : c.nextDisabled ? (c.hint || "") : isLast ? (c.nextHint || "All set. Press the button to continue.") : "Press Next →" };
 }
 
+/** A level whose earlier switch is still open: say so and point at the level to play. */
+function lockedScreen(l, cur) {
+  const btn = cur ? el("button", { class: "primary big", "data-pt": "to-current", on: { click: () => go(`#/level/${cur.id}`) } }, `Go to Level ${cur.n}`) : null;
+  keys.back = () => go("#/map"); keys.next = () => btn?.click();
+  return {
+    nodes: [
+      el("div", { class: "crumbs" }, el("span", {}, `Level ${l.n} · ${l.title}`)),
+      el("section", { class: "card", "aria-labelledby": "cardtitle" }, el("h2", { id: "cardtitle" }, "Locked"),
+        el("p", { class: "lead" }, cur ? `Finish Level ${cur.n} (${cur.title}) first: its steps and its quiz close that switch and unlock the next one.` : "Finish the earlier levels first.")),
+      el("div", { class: "navrow" }, el("button", { class: "big", "data-pt": "back", on: { click: () => go("#/map") } }, "← Map"), btn),
+    ],
+    target: btn, hint: cur ? `Level ${cur.n} comes first. Press the button.` : "",
+  };
+}
+
 const keys = { back: null, next: null };
 addEventListener("keydown", (e) => {
   if (route().name !== "level" || e.altKey || e.ctrlKey || e.metaKey) return;
@@ -291,6 +354,17 @@ function fill(t) {
 function nextLevelAfter(l) {
   const order = [...state.levels].sort((a, b) => a.n - b.n);
   return order.find((x) => x.n > l.n && x.available !== false) || null;
+}
+const TODO_TEXT = { wallet: "Build your world and claim a seat", goal: "Run the goal", shouldFail: "Try the should-fail step", quiz: "Take the quiz", read: "Read the explainer" };
+/** "What's left" card for a level that isn't done: no way forward, one button back to the step. */
+function todoCard(l, title, lead, todoIdx) {
+  const todo = levelTodo(l, { walletDone: walletDone(), read: ui.read });
+  const label = TODO_TEXT[todo] || "Back to the steps";
+  return {
+    title, body: [el("p", { class: "lead" }, lead), el("p", { class: "note" }, `Left to do: ${label.toLowerCase()}. Level ${l.n + 1} unlocks after this level's quiz.`)], more: false,
+    nextLabel: `← ${label}`, nextHint: `${label} first. Press the button.`,
+    next: () => { ui.step[l.id] = todoIdx; saveUi(); render(); },
+  };
 }
 function finishCard(l, title, lead) {
   const nx = nextLevelAfter(l);
@@ -340,10 +414,11 @@ function quizCards(l, firstIdx) {
     catch (e) { quizMsg[l.id] = e.message; }
   });
   if (!qz.unlocked) {
-    return { cards: [], finish: () => ({ title: "Quiz locked", body: [el("p", { class: "lead" }, l.n === 0 || !state.world ? "Build your world in Level 0 first. The quiz runs in your own world." : "Finish this level first.")], more: false }) };
+    return { cards: [], finish: () => todoCard(l, "Quiz locked", l.n === 0 || !state.world ? "Build your world in Level 0 first. The quiz runs in your own world." : "Finish this level's steps first.", l.n === 0 ? 4 : 2) };
   }
   const cards = qz.questions.map((q, i) => {
     const a = qz.answers[i];
+    let group;
     const blocked = !qz.passed && i > qz.answers.length;
     const buttons = q.choices.map((c, k) => el("button", {
       class: "choice" + (a && a.choice === k ? (a.correct ? " right" : " wrong") : ""), "data-pt": `quiz-choice-${k}`,
@@ -353,7 +428,7 @@ function quizCards(l, firstIdx) {
       title: `Quiz ${i + 1} of ${n}`, diag: null, more: false,
       body: [
         el("p", { class: "lead" }, q.q),
-        el("div", { class: "choices", role: "group", "aria-label": `Question ${i + 1} choices` }, buttons),
+        group = el("div", { class: "choices", role: "group", "data-pt": `quiz-choices-${i}`, "aria-label": `Question ${i + 1} choices` }, buttons),
         a ? el("p", { class: "result " + (a.correct ? "ok" : "bad"), role: "status" }, a.correct ? "Correct ✓" : `Not quite. Here's why: ${a.why}`) : null,
         blocked ? el("p", { class: "note" }, `Answer question ${qz.answers.length + 1} first.`) : null,
         quizMsg[l.id] ? el("p", { class: "result bad", role: "alert" }, quizMsg[l.id]) : null,
@@ -362,12 +437,14 @@ function quizCards(l, firstIdx) {
           : `Pass with ${qz.pass} of ${n}. ${QUIZ_PTS} points per right answer on your first try.`),
       ],
       nextDisabled: !a && !qz.passed && !over,
-      hint: "Pick an answer.",
+      // The flashing arrow points at the answers until one is picked (then at Next).
+      target: () => (!a && !qz.passed && !over && !blocked && !busy ? group : null),
+      hint: blocked ? `Answer question ${qz.answers.length + 1} first.` : "Pick an answer.",
     };
   });
   const finish = (f) => {
     if (qz.passed) return f;
-    if (!over) return { title: "Finish the quiz", body: [el("p", { class: "lead" }, `${qz.answers.length} of ${n} answered. Go back and answer the rest.`)], more: false };
+    if (!over) return todoCard(l, "Finish the quiz", `${qz.answers.length} of ${n} answered.`, firstIdx + qz.answers.length);
     let btn;
     return {
       title: `Quiz: ${right} of ${n} right`, more: false,
@@ -408,11 +485,13 @@ function resultBox(r) {
 function scoredCards(l) {
   const res = (results[l.id] ||= {});
   const run = (part) => act(part, async () => {
-    try { res[part] = await api(`/api/levels/${l.id}/${part === "goal" ? "goal" : "should-fail"}`, { player: me(), world: addr() }); }
+    res.wait = "";
+    try { res[part] = await runLevel(l.id, part, (m) => { if (res.wait !== m) { res.wait = m; render(); } }); }
     catch (e) { res[part] = { ok: false, message: "Error: " + e.message }; }
+    res.wait = "";
   });
-  const waitNote = l.id === "lend" ? "This one waits for the vault's investment phase: about 4 minutes." : "Ledger steps take a few seconds each.";
-  const working = (part) => busy === part ? el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), `Working on ${state.network}… ${waitNote}`) : null;
+  const waitNote = l.id === "lend" ? "This one waits for the vault's investment phase: usually about a minute, sometimes a few." : "Ledger steps take a few seconds each.";
+  const working = (part) => busy === part ? el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), `Working on ${state.network}… ${waitNote}`, res.wait ? el("span", { class: "note" }, " " + res.wait) : null) : null;
   const roleList = l.goalRoles.join(", ");
 
   let goalBtn, failBtn;
@@ -436,6 +515,7 @@ function scoredCards(l) {
       ],
       more: false,
       target: () => (!l.score.goal && !busy ? goalBtn : null),
+      nextDisabled: !l.score.goal, // the goal must clear before the level moves on
       hint: noWorld ? "Build your world in Level 0 first." : "Press Run level.",
     },
     {
@@ -448,12 +528,13 @@ function scoredCards(l) {
       ],
       more: false,
       target: () => (!l.score.shouldFail && !busy ? failBtn : null),
+      nextDisabled: !l.score.shouldFail,
       hint: "Press Try it. The ledger should refuse it.",
     },
   ];
   const pts = (l.score.goal ? 10 : 0) + (l.score.shouldFail ? 5 : 0) + (l.score.goal && l.score.shouldFail ? 5 : 0);
   const done = l.score.goal && l.score.shouldFail;
-  if (!done) { cards.push(finishCard(l, "Almost there", `You have ${pts} of 20 points. Finish both steps, then a 3-question quiz closes this switch.`)); return cards; }
+  if (!done) { cards.push(todoCard(l, "Almost there", `You have ${pts} of 20 points. Finish both steps, then a 3-question quiz closes this switch.`, l.score.goal ? 3 : 2)); return cards; }
   const qz = quizCards(l, cards.length);
   cards.push(...qz.cards, qz.finish(finishCard(l, "Switch closed ✓", `Level ${l.n} complete: ${pts} of 20 level points + ${l.quiz?.points ?? 0} of ${l.quiz?.maxPoints ?? 0} quiz points (first try). Score ${state.score}/${state.maxScore}.`)));
   return cards;
@@ -489,6 +570,7 @@ function walletCards(l) {
       ],
       more: false,
       target: () => (!address ? genBtn : null),
+      nextDisabled: !address,
       hint: "Press Generate wallet.",
     },
     {
@@ -510,7 +592,8 @@ function walletCards(l) {
       ],
       more: false,
       target: () => (address && !funded && !busy ? fundBtn : null),
-      hint: "Press Fund from faucet.",
+      nextDisabled: !funded && !state.world, // a world already exists: its accounts are funded
+      hint: address ? "Press Fund from faucet." : "Make a wallet first.",
     },
     state.world ? {
       title: mySeat?.wallet ? "Seat claimed ✓" : "Claim a seat", diag: "wallet:seat",
@@ -523,6 +606,7 @@ function walletCards(l) {
       })(),
       more: false,
       target: () => (mySeat?.wallet ? null : firstSeat),
+      nextDisabled: !mySeat?.wallet,
       hint: "Pick a seat.",
     } : {
       title: "Build your world", diag: "wallet:world",
@@ -535,10 +619,11 @@ function walletCards(l) {
       ],
       more: false,
       target: () => (address && !busy ? worldBtn : null),
-      hint: "Press Start my world.",
+      nextDisabled: true, // the seat card replaces this one once the world exists
+      hint: address ? "Press Start my world." : "Make a wallet first.",
     },
     ...(walletDone() && l.quiz ? (() => { const qz = quizCards(l, 5); return [...qz.cards, qz.finish(finishCard(l, "Wallet ready ✓", `Switch closed. Quiz: ${l.quiz.points} of ${l.quiz.maxPoints} first-try points. Level 1 is next.`))]; })()
-      : [finishCard(l, "Wallet step", "Build your world and claim a seat with your wallet. Then a 3-question quiz closes this switch.")]),
+      : [todoCard(l, "Wallet step", "Build your world and claim a seat with your wallet. Then a 3-question quiz closes this switch.", 4)]),
   ];
 }
 

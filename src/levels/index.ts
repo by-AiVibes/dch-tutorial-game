@@ -107,7 +107,7 @@ export const LEVELS: LevelDef[] = [
       "The ConfidentialTransfer amendment is a proposal in amendment voting; check its status on the Known Amendments page and in this game's live amendment check.",
       "Per xrpl.org, it uses EC-ElGamal encryption and zero-knowledge proofs so individual MPT balances and transfer amounts are shielded from public view (spec: XLS-96).",
       "Compliance still works: authorized parties such as the issuer or a designated auditor can verify total supply.",
-      "This level becomes interactive only after the live check shows ConfidentialTransfer enabled on the selected test network.",
+      "Interactive steps are planned; they will turn on only where the live check shows ConfidentialTransfer enabled. The status for this network is in the Network check panel.",
     ],
   }),
 ];

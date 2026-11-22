@@ -56,7 +56,7 @@ Other commands: `npm run dch -- amendments` (live amendment check), `npm run dch
 | 5 | Batch: create plus accept | Batch (or BatchV1_1) | **playable** |
 | 6 | Deposit in a single-asset vault | SingleAssetVault | **playable** where enabled (devnet), priority |
 | 7 | Fund a loan and repay it | SingleAssetVault + LendingProtocol | **playable** where enabled (devnet), priority |
-| 8 | Explainer: confidential MPT transfers | ConfidentialTransfer | **priority**, read-only until enabled |
+| 8 | Explainer: confidential MPT transfers | ConfidentialTransfer | **priority**, read-only explainer (interactive steps planned) |
 
 **Priority for the next slices:** the Single Asset Vault and Lending Protocol levels (6–7) and
 the ConfidentialTransfer explainer (8), because these amendments are in voting right now. They
@@ -160,4 +160,4 @@ public/             dashboard (vanilla JS)
 test/               fast unit tests
 ```
 
-See [DEPLOY.md](DEPLOY.md) for hosting notes.
+See [docs/INSTRUCTOR.md](docs/INSTRUCTOR.md) for running a session and [DEPLOY.md](DEPLOY.md) for hosting notes.

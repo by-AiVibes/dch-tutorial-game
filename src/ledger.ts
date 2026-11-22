@@ -46,9 +46,17 @@ export async function connect(cfg: NetworkConfig): Promise<Client> {
 }
 
 /** Fund a brand-new wallet from the public faucet. Seed stays in memory/state file; never logged. */
-export async function fundNew(client: Client, cfg: NetworkConfig): Promise<Wallet> {
-  const { wallet } = await client.fundWallet(null, { faucetHost: cfg.faucetHost });
-  return wallet;
+export async function fundNew(client: Client, cfg: NetworkConfig, retries = 1): Promise<Wallet> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const { wallet } = await client.fundWallet(null, { faucetHost: cfg.faucetHost });
+      return wallet;
+    } catch (err) {
+      // Public faucets rate-limit and hiccup; retry once after a pause, then give up cleanly.
+      if (attempt >= retries) throw new Error(`Faucet ${cfg.faucetHost} failed: ${err instanceof Error ? err.message : err}. The previous world is unchanged; try reset-world again later.`);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
 }
 
 /**

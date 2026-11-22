@@ -1,6 +1,6 @@
 // Level 1: issue a token and keep rippling OFF on holder wallets.
 // Facts: https://xrpl.org/docs/concepts/tokens/fungible-tokens/rippling
-//        https://xrpl.org/docs/tutorials/how-tos/use-tokens/issue-a-fungible-token
+//        https://xrpl.org/docs/tutorials/tokens/fungible-tokens/issue-a-fungible-token
 
 import { AccountSetAsfFlags, TrustSetFlags } from "xrpl";
 import { CURRENCY } from "../config.ts";
@@ -101,7 +101,7 @@ export const level1: LevelDef = {
   bots: "Holder bots open trust lines and try to hop value through each other.",
   docs: [
     { title: "Rippling", href: "https://xrpl.org/docs/concepts/tokens/fungible-tokens/rippling" },
-    { title: "Issue a fungible token", href: "https://xrpl.org/docs/tutorials/how-tos/use-tokens/issue-a-fungible-token" },
+    { title: "Issue a fungible token", href: "https://xrpl.org/docs/tutorials/tokens/fungible-tokens/issue-a-fungible-token" },
     { title: "Trust lines and issuing", href: "https://xrpl.org/docs/concepts/tokens/fungible-tokens" },
   ],
   runGoal,

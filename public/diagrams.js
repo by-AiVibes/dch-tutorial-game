@@ -44,7 +44,7 @@ export const DIAG = {
   "issue:goal": { nodes: [n("bank", "issuer"), n("person", "holder"), n("person", "holder 2")], links: ["trust line", "TST"], caption: ["Holders open trust lines to the issuer.", "Tokens go holder → issuer → holder."] },
   "issue:fail": { nodes: [n("bank", "issuer"), n("person", "holder"), n("person", "holder 2")], links: ["TST", "via holder"], bad: 1, caption: ["NoRipple on the holder's lines blocks the hop.", "Ledger result: tecPATH_DRY."] },
   // Level 2
-  "freeze:goal": { nodes: [n("bank", "issuer"), n("lock", "frozen line"), n("person", "holder")], links: ["freeze", "claw back"], caption: ["The issuer freezes the line, then claws tokens back.", "Clawback must be switched on before issuing."] },
+  "freeze:goal": { nodes: [n("bank", "issuer"), n("lock", "frozen line"), n("person", "holder")], links: ["freeze", "claw back"], caption: ["The issuer freezes the line, then claws tokens back.", "Clawback must be switched on before the issuer owns anything (no trust lines yet)."] },
   "freeze:fail": { nodes: [n("bank", "Level 1 issuer"), n("person", "holder")], links: ["claw back"], bad: 0, caption: ["This issuer never enabled clawback: refused."] },
   // Level 3
   "creds:goal": { nodes: [n("bank", "issuer"), n("badge", "credential"), n("person", "holder", "ok")], links: ["create", "accept"], caption: ["The issuer creates a credential for the holder.", "It counts only after the holder accepts it."] },
@@ -62,10 +62,10 @@ export const DIAG = {
   "lend:goal": { nodes: [n("vault", "vault"), n("briefcase", "loan broker"), n("person", "borrower")], links: ["funds", "10 XRP loan"], caption: ["The broker lends vault funds, backed by first-loss cover.", "The borrower repays the loan."] },
   "lend:fail": { nodes: [n("briefcase", "loan broker"), n("person", "borrower")], links: ["25 XRP loan"], bad: 0, caption: ["Above the broker's 20 XRP debt maximum: refused."] },
   // Level 8 (explainer parts)
-  "confidential:p0": { nodes: [n("coin", "MPT"), n("wallet", "account")], links: ["held directly"], caption: ["No trust line needed for a multi-purpose token."] },
+  "confidential:p0": { nodes: [n("coin", "MPT"), n("wallet", "account")], links: ["opts in"], caption: ["No trust line: the holder opts in with an MPToken entry."] },
   "confidential:p1": { nodes: [n("server", "this game"), n("ledger", "test network")], links: ["live check"], caption: ["The game checks the amendment live; it never assumes."] },
   "confidential:p2": { nodes: [n("coin", "amount"), n("eyeoff", "hidden"), n("check", "proof valid", "ok")], links: ["encrypt", "ZK proof"], caption: ["Balances and amounts are shielded from public view;", "the ledger still verifies each transfer."] },
-  "confidential:p3": { nodes: [n("person", "issuer / auditor"), n("coin", "total supply", "ok")], links: ["verifies"], caption: ["Authorized parties can still check total supply."] },
+  "confidential:p3": { nodes: [n("person", "issuer / auditor"), n("coin", "balance", "ok")], links: ["decrypts"], caption: ["The issuer (and an auditor, if set) can decrypt balances.", "Total supply stays public."] },
   "confidential:p4": { nodes: [n("doc", "hands-on steps"), n("ledger", "when enabled")], links: ["coming"], caption: ["Runs only where the live check shows it enabled."] },
   // shared
   seat: { nodes: [n("person", "you"), n("seat", "a seat"), n("server", "bots")], links: ["optional", "rest"], caption: ["Play a seat yourself, or let bots play them all."] },

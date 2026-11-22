@@ -120,7 +120,8 @@ test("teaching diagrams: every scored level has goal + should-fail diagrams; cap
   for (const k of ["wallet:devnet", "wallet:wallet", "wallet:seed", "wallet:fund", "wallet:world", "wallet:seat", "seat", "done"]) assert.ok(D.DIAG[k], k);
   for (const [k, d] of Object.entries<any>(D.DIAG)) {
     assert.ok(d.caption.length >= 1 && d.caption.length <= 2, `${k}: 1-2 caption lines`);
-    for (const line of d.caption) assert.ok(line.length <= 64, `${k}: caption too long: ${line}`);
+    // 90: the fact-checked clawback caption (wraps to two rows at 375px, checked in a screenshot).
+    for (const line of d.caption) assert.ok(line.length <= 90, `${k}: caption too long: ${line}`);
     assert.ok(d.nodes.length >= 2 && d.nodes.length <= 3, `${k}: 2-3 nodes`);
     for (const nd of d.nodes) assert.ok(D.ICONS[nd.icon], `${k}: icon ${nd.icon}`);
     if (d.bad !== undefined) assert.ok(d.bad < d.nodes.length - 1, `${k}: bad link index`);

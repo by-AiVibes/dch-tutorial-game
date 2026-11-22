@@ -13,7 +13,7 @@ export const FEATURE_AMENDMENTS: Record<string, Requirement[]> = {
   Clawback: ["Clawback"],
   Credentials: ["Credentials"],
   PermissionedDomains: ["PermissionedDomains", "PermissionedDEX"],
-  Batch: [["Batch", "BatchV1_1"]],
+  Batch: [["Batch", "BatchV1_1"]], // "Batch" is obsolete; BatchV1_1 is the live one
   MPTokensV1: ["MPTokensV1"],
   SingleAssetVault: ["MPTokensV1", "SingleAssetVault"],
   LendingProtocol: ["MPTokensV1", "SingleAssetVault", "LendingProtocol"],

@@ -24,7 +24,7 @@ export const ANSWER_KEY = {
     ["Who creates the credential?", "The issuer"],
   ],
   domain: [
-    ["Who can trade in a permissioned domain's DEX?", "Only accounts holding an accepted credential the domain lists"],
+    ["Who can trade in a permissioned domain's DEX?", "The domain owner, plus accounts holding an accepted, unexpired credential the domain lists"],
     ["A bot with no DCH-KYC credential places an offer in the domain. Result?", "It's refused"],
     ["What does Level 4 build on from Level 3?", "The DCH-KYC credential"],
   ],
@@ -44,9 +44,9 @@ export const ANSWER_KEY = {
     ["Where does the money lent come from?", "The lender's vault"],
   ],
   confidential: [
-    ["What's an MPT held with?", "Directly in the account, no trust line"],
+    ["What's an MPT held with?", "An MPToken entry the holder opts into (no trust line)"],
     ["What does ConfidentialTransfer hide from public view?", "Individual MPT balances and transfer amounts"],
-    ["Can the issuer or a designated auditor still verify total supply?", "Yes"],
+    ["Who can decrypt a holder's confidential balance?", "The holder, the issuer, and an auditor if one is set"],
   ],
 };
 

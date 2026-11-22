@@ -62,7 +62,7 @@ levels 6–7 show coming soon. A full devnet run scored 140/140 — see
 | 2 | Freeze and clawback | Clawback | **playable** |
 | 3 | Issue and accept a credential | Credentials | **playable** |
 | 4 | Open a permissioned domain | PermissionedDomains + PermissionedDEX | **playable** |
-| 5 | Batch: create plus accept | Batch (or BatchV1_1) | **playable** |
+| 5 | Batch: create plus accept | BatchV1_1 (live on mainnet; the original Batch is obsolete) | **playable** |
 | 6 | Deposit in a single-asset vault | SingleAssetVault | **playable** where enabled (devnet), priority |
 | 7 | Fund a loan and repay it | SingleAssetVault + LendingProtocol | **playable** where enabled (devnet), priority |
 | 8 | Explainer: confidential MPT transfers | ConfidentialTransfer | **priority**, read-only explainer (interactive steps planned) |

@@ -50,8 +50,8 @@ export const QUIZZES: Record<string, QuizQuestion[]> = {
       why: "The issuer creates the credential; the holder accepts it." },
   ],
   domain: [
-    { q: "Who can trade in a permissioned domain's DEX?", choices: ["Everyone", "Only accounts holding an accepted credential the domain lists", "Only the issuer"], answer: 1,
-      why: "The domain admits only accounts that hold an accepted credential it lists." },
+    { q: "Who can trade in a permissioned domain's DEX?", choices: ["Everyone", "The domain owner, plus accounts holding an accepted, unexpired credential the domain lists", "Only the issuer"], answer: 1,
+      why: "The domain owner is always a member; anyone else needs an accepted, unexpired credential the domain lists." },
     { q: "A bot with no DCH-KYC credential places an offer in the domain. Result?", choices: ["It works", "It's refused", "It's queued until approved"], answer: 1,
       why: "Without an accepted credential the domain lists, the offer is refused." },
     { q: "What does Level 4 build on from Level 3?", choices: ["Clawback", "The DCH-KYC credential", "The vault"], answer: 1,
@@ -82,12 +82,12 @@ export const QUIZZES: Record<string, QuizQuestion[]> = {
       why: "The lender funds its vault, and the loan broker lends from it." },
   ],
   confidential: [
-    { q: "What's an MPT held with?", choices: ["A trust line", "Directly in the account, no trust line", "An NFT"], answer: 1,
-      why: "Multi-purpose tokens (MPTs) are held directly in an account, without a trust line." },
+    { q: "What's an MPT held with?", choices: ["A trust line", "An MPToken entry the holder opts into (no trust line)", "An NFT"], answer: 1,
+      why: "MPT balances live in an MPToken entry the holder creates by opting in (MPTokenAuthorize). No trust line is needed." },
     { q: "What does ConfidentialTransfer hide from public view?", choices: ["Account addresses", "Individual MPT balances and transfer amounts", "Everything about the token"], answer: 1,
       why: "Per xrpl.org, individual MPT balances and transfer amounts are shielded from public view." },
-    { q: "Can the issuer or a designated auditor still verify total supply?", choices: ["Yes", "No", "Only on devnet"], answer: 0,
-      why: "Compliance still works: the issuer or a designated auditor can verify total supply." },
+    { q: "Who can decrypt a holder's confidential balance?", choices: ["Anyone reading the ledger", "The holder, the issuer, and an auditor if one is set", "Nobody, not even the holder"], answer: 1,
+      why: "Each balance is encrypted under the holder's key, the issuer's key and an optional auditor's key. Validators only check the proofs." },
   ],
 };
 

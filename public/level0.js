@@ -69,16 +69,19 @@
   }
 
   function render() {
+    const net = st?.network ?? "test network";
+    const title = document.querySelector("#level0 h2");
+    if (title && st) title.firstChild.textContent = `Level 0: Get your ${net} wallet `;
     const address = wallet?.address || savedAddr();
     const freeSeats = st ? Object.values(st.seats).filter((s) => !s.player).map((s) => s.role) : [];
     root.replaceChildren(
       h("ol", {},
-        h("li", {}, h("b", {}, "What devnet is. "), "A public XRP Ledger test network for developers. Its XRP comes free from a faucet and ",
+        h("li", {}, h("b", {}, `What ${net} is. `), "A public XRP Ledger test network for developers. Its XRP comes free from a faucet and ",
           h("b", {}, "has no value"), ", and the network can be reset at any time, which wipes accounts. ",
           link("https://xrpl.org/docs/concepts/networks-and-servers/parallel-networks", "Parallel networks"), " · ",
           link("https://xrpl.org/resources/dev-tools/xrp-faucets", "Faucets")),
         h("li", {}, h("b", {}, "Create a wallet. "), "The game generates a key pair in this browser. ",
-          h("button", { on: { click: createWallet } }, wallet ? "Create another" : "Create my devnet wallet"), " ",
+          h("button", { on: { click: createWallet } }, wallet ? "Create another" : `Create my ${net} wallet`), " ",
           link("https://xrpl.org/docs/concepts/accounts/cryptographic-keys", "About keys")),
         wallet ? h("div", { class: "msg" },
           h("b", {}, "Save your seed. "), "It's test-only. ", h("b", {}, "Never reuse a test seed on mainnet."),
@@ -88,7 +91,7 @@
           h("button", { on: { click: () => { const c = document.getElementById("l0seed"); c.textContent = c.textContent.startsWith("•") ? wallet.seed : "•••••••• (click Show)"; } } }, "Show / hide")) : null,
         !wallet && address ? h("p", {}, "Your saved address: ", h("code", {}, address), " (the seed is not stored)") : null,
         h("li", {}, h("b", {}, "Fund it. "), "An account exists once it holds at least the base reserve. ",
-          h("button", { ...(address ? {} : { disabled: "" }), on: { click: fund } }, `Fund from the ${st?.network ?? ""} faucet`), " ",
+          h("button", { ...(address ? {} : { disabled: "" }), on: { click: fund } }, `Fund from the ${net} faucet`), " ",
           h("button", { ...(address ? {} : { disabled: "" }), on: { click: () => balance() } }, "Check balance"), " ",
           link("https://xrpl.org/docs/concepts/accounts", "Accounts"), " · ", link("https://xrpl.org/docs/concepts/accounts/reserves", "Reserves")),
         h("li", {}, h("b", {}, "Claim a seat with it. "), "Your address replaces a bot in that seat. ",

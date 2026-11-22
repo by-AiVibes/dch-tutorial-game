@@ -61,8 +61,14 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
     return send(res, 200, await game.account(cleanAddress(decodeURIComponent(acct[1]))));
   }
   if (req.method === "GET" && VENDOR[p]) {
+    let data: Buffer;
+    try {
+      data = await readFile(VENDOR[p]);
+    } catch {
+      return send(res, 500, { error: "vendor_missing" }); // never echo the file path
+    }
     res.writeHead(200, { "content-type": "text/javascript", "cache-control": "public, max-age=3600" });
-    return res.end(await readFile(VENDOR[p]));
+    return res.end(data);
   }
   if (req.method === "POST" && p.startsWith("/api/")) {
     const b = await body(req);

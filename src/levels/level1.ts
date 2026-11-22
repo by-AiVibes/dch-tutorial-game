@@ -6,8 +6,9 @@ import { AccountSetAsfFlags, TrustSetFlags } from "xrpl";
 import { CURRENCY } from "../config.ts";
 import type { LevelContext, LevelDef, StepOutcome } from "./types.ts";
 import type { TxResult } from "../ledger.ts";
+import { isOk } from "./util.ts";
 
-const ok = (r: TxResult) => r.engineResult === "tesSUCCESS";
+const ok = isOk; // validated tesSUCCESS
 const iou = (issuer: string, value: string) => ({ currency: CURRENCY, issuer, value });
 
 async function lineNoRipple(ctx: LevelContext, account: string, peer: string): Promise<boolean | null> {

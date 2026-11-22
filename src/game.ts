@@ -45,10 +45,12 @@ export class Game {
   }
 
   view() {
+    const net = this.cfg.name;
+    const fill = (t: string) => t.replaceAll("{network}", net).replaceAll("{Network}", net[0].toUpperCase() + net.slice(1));
     const levels = LEVELS.map((l) => ({
-      id: l.id, n: l.n, title: l.title, feature: l.feature, priority: !!l.priority,
-      goal: l.goal, shouldFail: l.shouldFail, rejectReason: l.rejectReason, bots: l.bots,
-      goalRoles: l.goalRoles, shouldFailRoles: l.shouldFailRoles, docs: l.docs, explainer: l.explainer ?? null,
+      id: l.id, n: l.n, title: fill(l.title), feature: l.feature, priority: !!l.priority,
+      goal: fill(l.goal), shouldFail: l.shouldFail, rejectReason: l.rejectReason, bots: l.bots,
+      goalRoles: l.goalRoles, shouldFailRoles: l.shouldFailRoles, docs: l.docs, explainer: l.explainer?.map(fill) ?? null,
       available: this.levelAvailable(l.id),
       playable: !!l.runGoal && this.levelAvailable(l.id),
       score: this.state.scores[l.id] ?? { goal: false, shouldFail: false },

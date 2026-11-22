@@ -15,8 +15,8 @@ const live = (d: Omit<LevelDef, "runGoal" | "runShouldFail">, r: Pick<LevelDef, 
 
 export const LEVELS: LevelDef[] = [
   planned({
-    id: "wallet", n: 0, title: "Get your devnet wallet", feature: null,
-    goal: "Learn what devnet is, create your own test wallet in this browser, fund it from the public faucet, check its balance live, and claim a seat with it.",
+    id: "wallet", n: 0, title: "Get your {network} wallet", feature: null,
+    goal: "Learn what {network} is, create your own test wallet in this browser, fund it from the public faucet, check its balance live, and claim a seat with it.",
     shouldFail: "(Unscored onboarding level.)",
     rejectReason: "",
     expectedRejects: [],
@@ -30,7 +30,7 @@ export const LEVELS: LevelDef[] = [
       { title: "Cryptographic keys", href: "https://xrpl.org/docs/concepts/accounts/cryptographic-keys" },
     ],
     explainer: [
-      "Devnet is a public XRP Ledger test network for developers. Its XRP is free from a faucet and has no value, and the network can be reset at any time, wiping accounts.",
+      "{Network} is a public XRP Ledger test network for developers. Its XRP is free from a faucet and has no value, and the network can be reset at any time, wiping accounts.",
       "An account is created by sending it enough XRP to meet the base reserve; the faucet does that for you.",
       "Your wallet's seed is its secret key. This game makes it in your browser and never sends it to the server: only your address (r…) is shared.",
     ],

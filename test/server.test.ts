@@ -8,8 +8,11 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
-const SEED = "sEdTM1uX8pu2do5XvTnutH6HsouMaM2"; // a well-formed but throwaway example seed
-const ADDR = "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe";
+import { Wallet } from "xrpl";
+// Generated fresh each run (never hard-coded, never printed, never funded).
+const W = Wallet.generate();
+const SEED = W.seed as string;
+const ADDR = W.address;
 
 process.env.DCH_DATA_DIR = mkdtempSync(join(tmpdir(), "dch-srv-"));
 const { Game } = await import("../src/game.ts");
@@ -72,6 +75,40 @@ test("browser Level 0 code never sends the seed anywhere", () => {
   for (const m of src.matchAll(/JSON\.stringify\(([^)]*)\)/g)) assert.ok(!/seed/i.test(m[1]), `request body ${m[1]}`);
   assert.ok(!/localStorage\.setItem\([^)]*seed/i.test(src), "seed must not be stored");
   assert.ok(!/console\.\w+\([^)]*seed/i.test(src), "seed must not be logged");
+});
+
+test("secret guard: refuses every secret shape, allows addresses", () => {
+  const ed = Wallet.generate();
+  const hex64 = ed.privateKey.replace(/^ED|^00/, "").slice(0, 64);
+  const cases: Record<string, string> = {
+    "embedded seed": `my seed is ${SEED} ok`,
+    "64-hex private key": hex64,
+    "66-hex private key": ed.privateKey,
+    "66-hex public key": ed.publicKey,
+    "32-hex entropy": "0123456789abcdef0123456789ABCDEF",
+    "12-word mnemonic": "abandon ability able about above absent absorb abstract absurd abuse access accident",
+    "secret numbers": "123456 234567 345678 456789 567890 678901 789012 890123",
+    "secret numbers with dashes": "123456-234567-345678-456789-567890-678901-789012-890123",
+  };
+  for (const [name, v] of Object.entries(cases)) {
+    assert.throws(() => assertNoSecrets({ wallet: v }), /never send a seed/, name);
+  }
+  for (const ok of [ADDR, ed.address, "ada", "a short note with five words", "123456 234567"]) {
+    assert.doesNotThrow(() => assertNoSecrets({ wallet: ok, player: "ada" }), ok);
+  }
+});
+
+test("level 0 names the configured network", () => {
+  const v = game.view();
+  const l0 = v.levels.find((l: { id: string }) => l.id === "wallet")!;
+  assert.equal(l0.title, `Get your ${v.network} wallet`);
+  assert.ok(!JSON.stringify(l0).includes("{network}") && !JSON.stringify(l0).includes("{Network}"));
+});
+
+test("missing vendor file does not leak a path", async () => {
+  const r = await fetch(`${base}/vendor/xrpl.js`);
+  const t = await r.text();
+  assert.ok(r.status === 200 || (r.status === 500 && !t.includes("/")));
 });
 
 test("secret guard and mainnet refusal", () => {

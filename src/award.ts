@@ -13,10 +13,30 @@ export const CARD_H = 675;
 export const MAX_PNG_BYTES = 1_500_000;
 export const NAME_MAX = 32;
 export const AWARD_ID_RE = /^[A-Za-z0-9_-]{24}$/;
-export const PUBLIC_URL = () => {
-  const u = process.env.DCH_PUBLIC_URL || "https://game.dch.everhostx.com";
-  return /^https?:\/\/[a-z0-9.-]+(:\d+)?$/i.test(u) ? u.replace(/\/$/, "") : "https://game.dch.everhostx.com";
-};
+const URL_RE = /^https?:\/\/[a-z0-9.-]+(:\d+)?$/i;
+const HOST_RE = /^[a-z0-9.-]+(:\d+)?$/;
+
+/** DCH_PUBLIC_URL (e.g. https://game.example.org), or null when unset or invalid. */
+export function configuredUrl(): string | null {
+  const u = (process.env.DCH_PUBLIC_URL || "").trim().replace(/\/$/, "");
+  return URL_RE.test(u) ? u : null;
+}
+
+/** The configured public host (for the card footer), or null. */
+export const configuredHost = () => configuredUrl()?.replace(/^https?:\/\//, "") ?? null;
+
+/**
+ * Base URL for absolute share links: DCH_PUBLIC_URL, else the request Host, but only behind a
+ * trusted proxy and only if the host is listed in DCH_PUBLIC_HOSTS. Otherwise null (no absolute URLs).
+ */
+export function publicBase(hostHeader: string | undefined, trustProxy: boolean): string | null {
+  const c = configuredUrl();
+  if (c) return c;
+  if (!trustProxy || !hostHeader) return null;
+  const h = hostHeader.trim().toLowerCase();
+  const allow = (process.env.DCH_PUBLIC_HOSTS || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  return HOST_RE.test(h) && allow.includes(h) ? `https://${h}` : null;
+}
 const FONTS = [join(import.meta.dirname, "..", "assets", "fonts", "DejaVuSans.ttf"), join(import.meta.dirname, "..", "assets", "fonts", "DejaVuSans-Bold.ttf")];
 
 /** Short level names for the card (same labels as the in-game map). */
@@ -26,6 +46,7 @@ export const SHORT: Record<string, string> = {
 };
 
 export interface AwardLevel { n: number; short: string }
+/** levels = exactly the levels the server required and verified for this award. */
 export interface AwardRecord {
   id: string;
   network: string;
@@ -142,12 +163,13 @@ function fitSize(escaped: string, width: number, max: number): number {
 }
 
 /** The award card as SVG. Every piece of player text is escaped. */
-export function awardSvg(rec: AwardRecord, host = PUBLIC_URL().replace(/^https?:\/\//, "")): string {
+export function awardSvg(rec: AwardRecord, host: string | null = configuredHost()): string {
   const name = esc(rec.name);
   const nameSize = fitSize(name, 480, 52);
   const X = 680;
+  const half = Math.ceil(rec.levels.length / 2);
   const rows = rec.levels.map((l, i) => {
-    const col = i < 5 ? 0 : 1, row = i < 5 ? i : i - 5;
+    const col = i < half ? 0 : 1, row = i < half ? i : i - half;
     const x = X + col * 245, y = 388 + row * 38;
     return `<circle cx="${x + 13}" cy="${y - 7}" r="13" fill="#123d2b" stroke="#3fb950" stroke-width="2"/><path d="M${x + 6} ${y - 7} l5 5 l9 -10" fill="none" stroke="#3fb950" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><text x="${x + 36}" y="${y}" font-size="20" fill="#e7f5ec"><tspan fill="#c8a052" font-weight="bold">${String(l.n).padStart(2, "0")}</tspan>  ${esc(l.short)}</text>`;
   }).join("");
@@ -171,9 +193,9 @@ ${board(40, 37, 600, rec.levels)}
 ${rows}
 <rect x="${X + 245}" y="535" width="235" height="42" rx="21" fill="#2b2510" stroke="#ffd34d" stroke-width="2"/>
 <text x="${X + 362}" y="563" text-anchor="middle" font-size="20" font-weight="bold" fill="#ffd34d">SCORE ${rec.score}/${rec.maxScore}</text>
-<rect x="${X}" y="595" width="480" height="48" rx="12" fill="#e7f5ec"/>
+${host ? `<rect x="${X}" y="595" width="480" height="48" rx="12" fill="#e7f5ec"/>
 <text x="${X + 18}" y="626" font-size="13" font-weight="bold" letter-spacing="1" fill="#1d6b4a">GET YOUR CARD →</text>
-<text x="1142" y="627" text-anchor="end" font-size="18" font-weight="bold" fill="#0d1a14">${esc(host)}</text>
+<text x="1142" y="627" text-anchor="end" font-size="18" font-weight="bold" fill="#0d1a14">${esc(host)}</text>` : ""}
 </svg>`;
 }
 
@@ -200,10 +222,18 @@ export function awardPng(rec: AwardRecord): Buffer {
 }
 
 /** The share page: Open Graph + Twitter tags so the link previews with the card on X. */
-export function awardHtml(rec: AwardRecord, base = PUBLIC_URL()): string {
+export function awardHtml(rec: AwardRecord, base: string | null): string {
   const title = `${rec.name}: DCH Graduate, circuit complete`;
-  const desc = `Completed all ${rec.levels.length} levels of the DCH Tutorial on XRPL ${rec.network}. Score ${rec.score}/${rec.maxScore}. #XRPEducationMonth`;
-  const page = `${base}/award/${rec.id}`, img = `${page}.png`;
+  const desc = `Completed all ${rec.levels.length} required levels of the DCH Tutorial on XRPL ${rec.network}. Score ${rec.score}/${rec.maxScore}. #XRPEducationMonth`;
+  const page = base ? `${base}/award/${rec.id}` : null, img = page ? `${page}.png` : null;
+  // Without a known public base, absolute og:url / og:image are omitted rather than guessed.
+  const abs = page && img ? `
+<meta property="og:url" content="${esc(page)}">
+<meta property="og:image" content="${esc(img)}">
+<meta property="og:image:width" content="${CARD_W}">
+<meta property="og:image:height" content="${CARD_H}">
+<meta property="og:image:alt" content="${esc(`DCH Graduate card for ${rec.name}: a fully lit circuit board ring with the DCH core powered, ${rec.score}/${rec.maxScore}`)}">
+<meta name="twitter:image" content="${esc(img)}">` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
@@ -211,22 +241,16 @@ export function awardHtml(rec: AwardRecord, base = PUBLIC_URL()): string {
 <meta property="og:type" content="website">
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(desc)}">
-<meta property="og:url" content="${esc(page)}">
-<meta property="og:image" content="${esc(img)}">
-<meta property="og:image:width" content="${CARD_W}">
-<meta property="og:image:height" content="${CARD_H}">
-<meta property="og:image:alt" content="${esc(`DCH Graduate card for ${rec.name}: a fully lit circuit board ring with the DCH core powered, ${rec.score}/${rec.maxScore}`)}">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${esc(title)}">
-<meta name="twitter:description" content="${esc(desc)}">
-<meta name="twitter:image" content="${esc(img)}">
+<meta name="twitter:description" content="${esc(desc)}">${abs}
 <meta name="robots" content="noindex">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/award.css">
 </head><body>
 <main class="award-page">
 <img src="/award/${esc(rec.id)}.png" width="${CARD_W}" height="${CARD_H}" alt="${esc(`DCH Graduate card for ${rec.name}`)}">
-<p>${esc(rec.name)} powered the full DCH circuit: ${rec.levels.length} levels of hands-on XRPL development on ${esc(rec.network)}.</p>
+<p>${esc(rec.name)} powered the full DCH circuit: all ${rec.levels.length} required levels of hands-on XRPL development on ${esc(rec.network)}.</p>
 <p><a class="cta" href="/">Play the DCH Tutorial and get your card</a></p>
 <p class="small">Test networks only, no real funds. Facts link to <a href="https://xrpl.org">xrpl.org</a>.</p>
 </main>

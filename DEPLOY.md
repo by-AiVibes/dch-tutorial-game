@@ -61,9 +61,15 @@ Plan, for later:
   evicted, so share links keep working). `GET /award/<id>` is the share page (Open Graph +
   `twitter:card=summary_large_image`); `GET /award/<id>.png` is the 1200x675 image, rendered
   once with `@resvg/resvg-js` and the bundled DejaVu Sans font (no system fonts needed).
-  - `DCH_PUBLIC_URL` (default `https://game.dch.everhostx.com`) is used for the absolute
-    `og:image` URL; set it if the game runs on another host.
-  - `DCH_MAX_AWARDS` (default 5000) → 503 when full. Rate limits: `award` class 10/hour per IP
+  - `DCH_PUBLIC_URL` (for example `https://game.example.org`) is the game's public base URL.
+    It is required for link previews: it sets the absolute `og:url`/`og:image` and is the only
+    host printed in the card footer. If it is unset, the share page uses the request `Host` only
+    when `TRUST_PROXY=1` and the host is listed in `DCH_PUBLIC_HOSTS` (comma-separated);
+    otherwise the absolute URLs and the card footer are left out.
+  - The card lists exactly the levels the server required and verified for that award: Level 0
+    plus every scored level live on the network. The Level 8 explainer is read in the browser
+    only, so it is not claimed on the card.
+  - `DCH_MAX_AWARDS` (default 2000) → 503 when full. Rate limits: `award` class 10/hour per IP
     (`DCH_RL_AWARD_MAX`), `awardview` 60/min per IP and 600/min server-wide.
   - CSP stays self-only: the card is a same-origin PNG; the share page has no scripts or inline
     styles. "Share on X" is a plain link to `x.com/intent/post`; the game never posts.

@@ -6,7 +6,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.ts";
 import { Game } from "./game.ts";
-import { AWARD_ID_RE, awardHtml, awardPng, loadAward } from "./award.ts";
+import { AWARD_ID_RE, awardHtml, awardPng, loadAward, publicBase } from "./award.ts";
 import { assertNoSecrets, cleanAddress } from "./secrets.ts";
 import { BusyError, CapError, classify, clientIp, RateLimiter, rulesFromEnv } from "./limits.ts";
 
@@ -67,13 +67,13 @@ export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv
       res.writeHead(429, { "content-type": "application/json", "retry-after": String(wait), "cache-control": "no-store" });
       return res.end(JSON.stringify({ error: "rate_limited", retryAfterSeconds: wait }));
     }
-    handle(game, req, res).catch((e) =>
+    handle(game, req, res, trustProxy).catch((e) =>
       e instanceof BusyError ? sendBusy(res, e.message) : e instanceof CapError ? sendCap(res, e) : send(res, 400, { error: e instanceof Error ? e.message : String(e) }),
     );
   };
 }
 
-async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
+async function handle(game: Game, req: IncomingMessage, res: ServerResponse, trustProxy = false) {
   let url: URL;
   try {
     url = new URL(req.url ?? "/", "http://localhost");
@@ -112,7 +112,7 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse) {
       return res.end(png);
     }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" });
-    return res.end(awardHtml(rec));
+    return res.end(awardHtml(rec, publicBase(req.headers.host, trustProxy)));
   }
   if (req.method === "GET" && VENDOR[p]) {
     let data: Buffer;

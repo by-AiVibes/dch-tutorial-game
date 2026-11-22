@@ -17,17 +17,12 @@ let id = 0; const pending = new Map(); const errors = [];
 ws.addEventListener("message", (m) => { const j = JSON.parse(m.data); if (j.id && pending.has(j.id)) { pending.get(j.id)(j); pending.delete(j.id); } else if (j.method === "Runtime.exceptionThrown") errors.push(j.params.exceptionDetails.exception?.description); else if (j.method === "Log.entryAdded" && j.params.entry.level === "error") errors.push(j.params.entry.text); });
 const send = (method, params = {}) => new Promise((res) => { const i = ++id; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); });
 const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 300)); return r.result?.result?.value; };
-const shot = async (name) => { await sleep(800); const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(OUT + name, Buffer.from(r.result.data, "base64")); console.log("shot", name); };
 const click = (pt) => ev(`(() => { const e = document.querySelector('[data-pt="${pt}"]'); if (!e) throw new Error("missing ${pt}"); e.click(); return true; })()`);
 const waitFor = async (expr, ms = 60000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await ev(expr)) return true; } catch {} await sleep(500); } throw new Error("timeout: " + expr); };
-const info = () => ev(`document.getElementById("hint").textContent + " | target=" + (document.querySelector(".target")?.dataset.pt || "none")`);
-const mapInfo = () => ev(`(() => { const t = document.querySelector(".maphead p")?.textContent; const closed = [...document.querySelectorAll(".node.done")].map(n => n.getAttribute("data-pt")).join(","); return t + " | closed: " + (closed || "none"); })()`);
 await send("Runtime.enable"); await send("Log.enable"); await send("Page.enable");
-await send("Emulation.setDeviceMetricsOverride", { width: 375, height: 812, deviceScaleFactor: 1, mobile: true });
-const goStep = async (lvl, step) => { await ev(`localStorage.setItem("dch-ui-v2", JSON.stringify({ ...JSON.parse(localStorage.getItem("dch-ui-v2") || "{}"), step: { ...(JSON.parse(localStorage.getItem("dch-ui-v2") || "{}").step || {}), ${lvl}: ${step} } }))`); await send("Page.navigate", { url: `${BASE}/#/level/${lvl}` }); await sleep(300); await send("Page.reload"); await waitFor(`!!document.getElementById("cardtitle")`); await sleep(500); };
 let bad = 0, checks = 0;
 try {
-  const OUT3 = process.env.SHOTS || "";
+  const SHOTS = process.env.SHOTS || "";
   const [W, H] = [375, Number(process.env.VH || 667)];
   await send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 2, mobile: true });
   await send("Page.navigate", { url: BASE + "/" }); await sleep(800);
@@ -53,7 +48,7 @@ try {
       await sleep(150);
       await click(`next-${i}`);
       await check(`${lvl} after Next -> card ${i + 1}`);
-      if (OUT3 && lvl === "wallet" && i === 1) { const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(OUT3 + "scrollfix-level0-card2-375.png", Buffer.from(r.result.data, "base64")); }
+      if (SHOTS && lvl === "wallet" && i === 1) { const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(SHOTS + "scrollfix-level0-card2-375.png", Buffer.from(r.result.data, "base64")); }
     }
   }
   console.log(`checks ${checks}, bad ${bad}; page errors:`, errors.length ? errors : "none");

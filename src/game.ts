@@ -33,7 +33,7 @@ export interface WorldCaps {
   maxAwards?: number;
 }
 export const defaultCaps = (): WorldCaps => ({
-  maxAwards: envNum("DCH_MAX_AWARDS", 5000),
+  maxAwards: envNum("DCH_MAX_AWARDS", 2000),
   maxWorlds: envNum("DCH_MAX_WORLDS", 100),
   minIdleMs: envNum("DCH_WORLD_MIN_IDLE_MS", 3_600_000),
   newPerHour: envNum("DCH_MAX_NEW_WORLDS_PER_HOUR", 30),
@@ -281,18 +281,27 @@ export class Game {
       this.touch(key);
       let rec = state.award ? loadAward(state.award.id) : null;
       if (!rec) {
-        if (awardCount() >= (this.caps.maxAwards ?? 5000)) throw new CapError("Too many awards stored on this server right now. Try again later.", 503, 3600);
+        if (awardCount() >= (this.caps.maxAwards ?? 2000)) throw new CapError("Too many awards stored on this server right now. Try again later.", 503, 3600);
         const date = state.award?.date ?? new Date(this.now()).toISOString().slice(0, 10);
         state.award = { id: newAwardId(), date };
         this.persist(state);
       }
       const next: AwardRecord = {
         id: state.award!.id, network: this.cfg.name, name, score: total(state.scores), maxScore: MAX_SCORE, date: state.award!.date,
-        levels: LEVELS.map((l) => ({ n: l.n, short: SHORT[l.id] ?? l.title })),
+        levels: this.requiredLevels().map((l) => ({ n: l.n, short: SHORT[l.id] ?? l.title })),
       };
       if (!rec || JSON.stringify(rec) !== JSON.stringify(next)) saveAward(next);
       return { id: next.id, name: next.name, score: next.score, maxScore: next.maxScore, date: next.date, page: `/award/${next.id}`, image: `/award/${next.id}.png` };
     });
+  }
+
+  /**
+   * The levels graduation requires and the server verifies: Level 0 (seat linked to the
+   * player's address) and every scored level live on this network. Explainers (Level 8) are
+   * read in the browser only, so they are not claimed on the card.
+   */
+  private requiredLevels() {
+    return LEVELS.filter((l) => l.n === 0 || (SCORED_LEVELS.includes(l) && this.levelAvailable(l.id)));
   }
 
   /** Levels this world hasn't finished (empty = graduated). */

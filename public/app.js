@@ -537,7 +537,7 @@ function graduateScreen() {
     const page = `${location.origin}/award/${id}`;
     const v = encodeURIComponent(grad.card?.name || localStorage.getItem("dch-award-name") || "");
     const score = grad.card?.score ?? state.score;
-    const text = `I completed the DCH Tutorial and powered the full circuit ⚡ Score: ${score}/${state.maxScore}. Learn XRPL dev hands-on on devnet 👇 ${page} @XRPLF #XRPEducationMonth`;
+    const text = `I completed the DCH Tutorial and powered the full circuit ⚡ Score: ${score}/${state.maxScore}. Learn XRPL dev hands-on on ${state.network} 👇 ${page} @XRPLF #XRPEducationMonth`;
     share = el("a", { class: "btn primary big", "data-pt": "share-x", href: "https://x.com/intent/post?text=" + encodeURIComponent(text), target: "_blank", rel: "noopener" }, "Share on X");
     nodes.push(el("div", { class: "card grad" },
       el("img", { class: "award-img", src: `/award/${id}.png?v=${v}`, width: "1200", height: "675", alt: "Your DCH Graduate card: the fully lit circuit with the DCH core powered" }),

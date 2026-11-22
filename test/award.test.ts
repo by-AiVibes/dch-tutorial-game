@@ -10,6 +10,8 @@ import type { AddressInfo } from "node:net";
 import { Wallet } from "xrpl";
 
 process.env.DCH_DATA_DIR = mkdtempSync(join(tmpdir(), "dch-award-"));
+process.env.DCH_PUBLIC_URL = "https://game.example.org"; // neutral test host
+delete process.env.DCH_PUBLIC_HOSTS;
 const { Game } = await import("../src/game.ts");
 const { createHandler } = await import("../src/server.ts");
 const { loadConfig } = await import("../src/config.ts");
@@ -92,14 +94,20 @@ test("PNG renders server-side at 1200x675 with the bundled font, under the size 
   await g.graduate(a, "New name");
   assert.ok(!existsSync(join(AW.awardsDir(), `${id}.png`)), "rename drops the cached image");
   const svg = AW.awardSvg(AW.loadAward(id)!);
-  for (const t of ["DCH GRADUATE", "CIRCUIT COMPLETE", "DCH CORE", "POWERED", "SCORE 140/140", "#XRPEducationMonth", "game.dch.everhostx.com", "UTC", "Confidential", "Wallet"]) assert.ok(svg.includes(t), t);
+  for (const t of ["DCH GRADUATE", "CIRCUIT COMPLETE", "DCH CORE", "POWERED", "8/8", "SCORE 140/140", "#XRPEducationMonth", "game.example.org", "UTC", "Wallet", "Loan"]) assert.ok(svg.includes(t), t);
+  assert.ok(!svg.includes("Confidential"), "the browser-only explainer is not claimed");
+  const saved = process.env.DCH_PUBLIC_URL;
+  delete process.env.DCH_PUBLIC_URL;
+  const bare = AW.awardSvg(AW.loadAward(id)!);
+  assert.ok(!bare.includes("GET YOUR CARD") && !bare.includes("game.example.org"), "no configured host -> no footer");
+  process.env.DCH_PUBLIC_URL = saved;
   assert.ok(!/xaman|xumm|price|token sale|invest/i.test(svg));
 });
 
 test("names: escaped in SVG and HTML, length-capped, no addresses, no control characters", () => {
   const evil = `<script>alert("x")</script>`.slice(0, 32);
   const rec = { id: "A".repeat(24), network: "devnet", name: AW.cleanName(evil), score: 140, maxScore: 140, date: "2026-11-22", levels: [{ n: 0, short: "Wallet" }] };
-  const svg = AW.awardSvg(rec), html = AW.awardHtml(rec);
+  const svg = AW.awardSvg(rec), html = AW.awardHtml(rec, "https://game.example.org");
   assert.ok(!svg.includes("<script") && svg.includes("&lt;script&gt;"));
   assert.ok(!html.includes("<script") && html.includes("&lt;script&gt;"));
   assert.ok(!html.includes(`"x"`));
@@ -113,19 +121,39 @@ test("names: escaped in SVG and HTML, length-capped, no addresses, no control ch
 
 test("share page has og/twitter tags with absolute same-site URLs", () => {
   const rec = { id: "B".repeat(24), network: "devnet", name: "Ann", score: 140, maxScore: 140, date: "2026-11-22", levels: [{ n: 0, short: "Wallet" }] };
-  const html = AW.awardHtml(rec, "https://game.dch.everhostx.com");
+  const html = AW.awardHtml(rec, "https://game.example.org");
   const meta = (k: string) => new RegExp(`<meta (property|name)="${k}" content="([^"]+)">`).exec(html)?.[2];
   assert.equal(meta("twitter:card"), "summary_large_image");
-  assert.equal(meta("og:image"), `https://game.dch.everhostx.com/award/${rec.id}.png`);
+  assert.equal(meta("og:image"), `https://game.example.org/award/${rec.id}.png`);
+  assert.equal(meta("og:url"), `https://game.example.org/award/${rec.id}`);
   assert.equal(meta("twitter:image"), meta("og:image"));
   assert.equal(meta("og:image:width"), "1200");
   assert.equal(meta("og:image:height"), "675");
   assert.match(meta("og:title")!, /Ann: DCH Graduate/);
   assert.match(meta("og:description")!, /#XRPEducationMonth/);
   assert.ok(!/<script|style=|\son\w+=/i.test(html), "nothing that needs a CSP exception");
-  process.env.DCH_PUBLIC_URL = "javascript:alert(1)";
-  assert.equal(AW.PUBLIC_URL(), "https://game.dch.everhostx.com", "bad base URL falls back");
-  delete process.env.DCH_PUBLIC_URL;
+  assert.match(meta("og:description")!, /Completed all 1 required levels/);
+  // no known base: absolute URLs are omitted, not guessed
+  const noBase = AW.awardHtml(rec, null);
+  assert.ok(!/og:image|og:url|twitter:image/.test(noBase));
+  assert.match(noBase, /twitter:card" content="summary_large_image"/);
+  const saved = process.env.DCH_PUBLIC_URL;
+  try {
+    process.env.DCH_PUBLIC_URL = "javascript:alert(1)";
+    assert.equal(AW.configuredUrl(), null, "invalid DCH_PUBLIC_URL is ignored");
+    delete process.env.DCH_PUBLIC_URL;
+    assert.equal(AW.publicBase("game.example.org", true), null, "not in the allowlist");
+    process.env.DCH_PUBLIC_HOSTS = "game.example.org, other.example.org";
+    assert.equal(AW.publicBase("game.example.org", true), "https://game.example.org");
+    assert.equal(AW.publicBase("Game.Example.org", false), null, "Host is ignored without a trusted proxy");
+    assert.equal(AW.publicBase("evil.example.net", true), null);
+    assert.equal(AW.publicBase('game.example.org"><script>', true), null);
+    process.env.DCH_PUBLIC_URL = "https://cfg.example.org/";
+    assert.equal(AW.publicBase("game.example.org", true), "https://cfg.example.org", "configured URL wins");
+  } finally {
+    process.env.DCH_PUBLIC_URL = saved;
+    delete process.env.DCH_PUBLIC_HOSTS;
+  }
 });
 
 test("server: POST /api/award verifies, GET /award/<id> (+ .png) serve, unknown ids 404, seeds refused", async () => {
@@ -170,4 +198,16 @@ test("rate limits: award creation and award views have their own classes", async
   assert.equal(rl.check("1.2.3.4", "awardview"), 0);
   assert.equal(rl.check("1.2.3.4", "awardview"), 0);
   assert.ok(rl.check("1.2.3.4", "awardview") > 0);
+});
+
+test("card lists exactly the levels the server required: a level off on this network is left out", async () => {
+  const { g, any } = fakeGame();
+  any.levelAvailable = (id: string) => id !== "vault";
+  const a = await player(g, any, { skip: "vault" });
+  const { id } = await g.graduate(a, "Ann");
+  const rec = AW.loadAward(id)!;
+  assert.deepEqual(rec.levels.map((l: any) => l.short), ["Wallet", "Token", "Freeze", "Credential", "Domain", "Batch", "Loan"]);
+  const svg = AW.awardSvg(rec);
+  assert.ok(svg.includes("7/7") && !svg.includes("Vault") && !svg.includes("Confidential"));
+  assert.match(AW.awardHtml(rec, null), /Completed all 7 required levels/);
 });

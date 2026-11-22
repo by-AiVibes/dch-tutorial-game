@@ -2,6 +2,11 @@ node_modules/
 .data/
 .env
 .env.*
+.env*
 *.log
 e2e-out/
 .e2e-player.json
+
+# Runtime stats (also stored under DCH_DATA_DIR, already ignored via .data/)
+stats.json
+*.stats.json

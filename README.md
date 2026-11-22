@@ -1,10 +1,14 @@
 # DCH Tutorial Game
 
-Learn the XRP Ledger by playing short levels on a **test network** (testnet or devnet).
-You claim a role seat; bots play the other seats. Each level has a **goal** to complete and a
+An educational game by **AiV**. Learn the XRP Ledger by playing short levels on a **test network**.
+
+This project is for the XRPL Foundation's [XRP Ledger Education Month](https://education.xrpl.foundation/) (#XRPEducationMonth).
+
+You claim a role seat; bots play the other seats. Each scored level has a **goal** to complete and a
 **should-fail** challenge that scores only when the ledger correctly rejects it.
 
-> Test networks only. No real funds, no mainnet keys. Test accounts come from the public
+> **Test networks only.** The default is **devnet**. **Testnet** is selectable with `XRPL_NETWORK=testnet`.
+> **Mainnet is always refused.** No real funds, no mainnet keys. Test accounts come from the public
 > faucet at runtime. Facts in the game link to [xrpl.org](https://xrpl.org/docs).
 
 ## Quick start
@@ -191,29 +195,31 @@ not on testnet**. Devnet is the default network, so these play out of the box (o
   maximum →
   [`tecLIMIT_EXCEEDED`](https://devnet.xrpl.org/transactions/CEE4DAA31F07F4428230153DB868FDB5D3870BFBCDF43159AA4858D373A3186A).
 
-## End-to-end playthrough (run it on your Mac)
+## End-to-end playthrough
 
 `npm run e2e` plays the live game like a phone player: Playwright headless Chromium at iPhone size,
 devnet or testnet only (it checks the server first and stops otherwise), no wallet app. It plays
 Level 0 through the graduate card, answers the quizzes from a test-only answer key
 (`e2e/lib.mjs`, never sent to the browser), and prints PASS/FAIL per level.
 
-Mac, one line (Node 20 or newer, e.g. 22.14 is fine; the e2e is plain JS. Running the server itself needs 22.18+):
+Node 20 or newer is enough for the e2e script (it is plain JavaScript). Running the game server itself still needs Node 22.18+.
+
+Against a local server (`npm start`, default http://127.0.0.1:8790):
 
 ```sh
-git clone https://github.com/by-AiVibes/dch-tutorial-game.git && cd dch-tutorial-game && npm ci && npx playwright install chromium && npm run e2e -- --url https://game.dch.everhostx.com
+git clone https://github.com/by-AiVibes/dch-tutorial-game.git && cd dch-tutorial-game && npm ci && npx playwright install chromium && npm run e2e
 ```
 
-Already cloned: `cd dch-tutorial-game && git pull && npm ci && npm run e2e -- --url https://game.dch.everhostx.com`
+Already cloned: `cd dch-tutorial-game && git pull && npm ci && npm run e2e`
 
-More:
+To point it at a hosted instance, pass `--url` (no default public host is hardcoded):
 
 ```sh
-npm run e2e -- --url https://game.dch.everhostx.com --runs 3     # 3 runs in a row, one world
-npm run e2e -- --url https://game.dch.everhostx.com --level 7    # only Level 7 (earlier levels played first if needed)
-npm run e2e -- --url https://game.dch.everhostx.com --fresh      # new wallet + world (counts toward 3 per hour)
-npm run e2e -- --url https://game.dch.everhostx.com --wrong freeze --headed   # miss one quiz answer, watch it
-npm run e2e -- --url https://game.dch.everhostx.com --latency 800      # add 0.8 s to every API call (slow phone network)
+npm run e2e -- --url https://your-game-host.example --runs 3     # 3 runs in a row, one world
+npm run e2e -- --url https://your-game-host.example --level 7    # only Level 7 (earlier levels played first if needed)
+npm run e2e -- --url https://your-game-host.example --fresh      # new wallet + world (counts toward 3 per hour)
+npm run e2e -- --url https://your-game-host.example --wrong freeze --headed   # miss one quiz answer, watch it
+npm run e2e -- --url https://your-game-host.example --latency 800      # add 0.8 s to every API call (slow phone network)
 ```
 
 Output in `./e2e-out/`: `report.md` (short and plain: the result, the fails, one line per level;
@@ -254,3 +260,13 @@ e2e/play.mjs, e2e/lib.mjs      `npm run e2e`: Playwright playthrough + report (a
 ```
 
 See [docs/INSTRUCTOR.md](docs/INSTRUCTOR.md) for running a session and [DEPLOY.md](DEPLOY.md) for hosting notes.
+
+## License
+
+[MIT](LICENSE) © 2026 AiV.
+
+The bundled DejaVu Sans font in `assets/fonts/` is under its own license; see [assets/fonts/FONT-LICENSE.txt](assets/fonts/FONT-LICENSE.txt). Production npm dependencies are listed in `package.json` (ISC/MIT, plus MPL-2.0 for `@resvg/resvg-js`).
+
+## Security
+
+Please report vulnerabilities privately to [support@everhostx.com](mailto:support@everhostx.com). See [SECURITY.md](SECURITY.md).

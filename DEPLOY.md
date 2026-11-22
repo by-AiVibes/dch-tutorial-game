@@ -1,11 +1,9 @@
-# Deploy (stub — not deployed)
+# Hosting notes
 
-Nothing is deployed. Hosting needs an explicit GO.
-
-Plan, for later:
+This file is a checklist for running your own copy behind HTTPS. It is not a promise that a particular host is online.
 
 - Runs as a single Node.js 22.18+ process: `npm ci --omit=dev && npm start`. No build step.
-- Can run on an EverHostX cluster (one small instance is enough).
+- A single small VPS or container is enough.
 - Put it behind HTTPS; bind `HOST=127.0.0.1` and proxy, or set `HOST=0.0.0.0` only behind a proxy.
 - Persist `DCH_DATA_DIR` on a volume. It holds throwaway test-network seeds: keep it mode 0700,
   never back it up publicly, never commit it.
@@ -95,8 +93,8 @@ Plan, for later:
     counted; the e2e and play-through scripts send `DCH-e2e`.
   - `DCH_STATS_BACKFILL=0` skips the one-time backfill from the worlds and award cards already on
     disk (it runs on the first start with stats; awards of evicted worlds count as graduates).
-  - Read it on the server: `sudo -u dchgame env DCH_DATA_DIR=/var/lib/dch-game npm run dch -- stats [days] [--json]`
-    in `/opt/dch-game`.
+  - Read it on the host, from the app directory, with `DCH_DATA_DIR` pointed at the data volume
+    (example path only): `DCH_DATA_DIR=/var/lib/dch-game npm run dch -- stats [days] [--json]`.
 - Network: devnet by default (`XRPL_NETWORK=devnet`); set `XRPL_NETWORK=testnet` to switch.
   Only allowlisted test hosts are accepted, and the server must report `network_id` 2 or 1;
   mainnet is refused.

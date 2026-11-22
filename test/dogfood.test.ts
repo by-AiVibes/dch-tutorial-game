@@ -34,7 +34,7 @@ test("levelTodo: steps before quiz; the quiz only counts once steps are done", (
 
 test("canOpen: the next level stays locked until the current level's steps AND quiz pass (bug f)", () => {
   const ctx = { walletDone: true };
-  // Level 1 not run (Dave's skip): Level 2 must not open, whatever button or URL leads there.
+  // Level 1 not run: Level 2 must not open, whatever button or URL leads there.
   let levels = [lv("wallet", 0, { quiz: quiz(true) }), lv("issue", 1), lv("freeze", 2)];
   assert.deepEqual(M.canOpen(levels, "freeze", ctx), { ok: false, current: "issue" });
   assert.equal(M.canOpen(levels, "issue", ctx).ok, true);

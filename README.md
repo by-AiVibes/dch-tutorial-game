@@ -47,6 +47,8 @@ levels 6–7 show coming soon. A full devnet run scored 140/140 — see
 - **reset-world:** funds a fresh set of faucet accounts (five seats plus a holder bot), puts bots in every seat, clears scores and recent results, and re-checks amendments. Safe to re-run: the old world is replaced only after all funding succeeds.
 - **Scoring:** 10 for a goal, 5 for a correctly rejected should-fail, +5 when both are done. Once per world. Seven scored levels, max 140. Only a *final* rejection counts (validated `tec`, or `tem`/`tef`/`tel`). Timeouts, queued or unvalidated results are *inconclusive*: 0 points, try again. If a should-fail is *accepted*, it scores 0 and is flagged for maintainers.
 - **Quiz gate:** after a level's goal and should-fail pass (Level 0: once your seat is linked; Level 8: any time in your world), a 3-question quiz closes the switch, one question per card. 2 of 3 right passes; a wrong answer shows a one-line "here's why" from the level text, and a failed attempt can be retried right away. Answers are checked on the server and never sent to the browser. Questions live in `src/quizzes.ts`.
+- **No skipping:** Next stays put on a step you haven't run yet (Run level / Try it) and on an unanswered quiz question; the arrow points at the button or the answer choices instead. A level's end card only offers the next level once its steps and quiz pass; otherwise it sends you back to what's left. A later level opened by URL or an old bookmark shows "Locked" and points at the level to play.
+- **Long runs:** the page starts a level run as a background job and polls it every 3 seconds (`POST /api/levels/<id>/<part>` with `"async": true`, then `GET /api/jobs/<id>`), so a phone that locks its screen or drops the connection during Level 7's wait keeps going instead of showing "Load failed".
 - **Score:** level points (max 140, as before) plus quiz points: 10 per right answer on your **first** attempt, 9 quizzes x 3 questions = 270. A perfect run is **410**. A retry (after fewer than 2 of 3) can pass the quiz and close the switch, but adds no points, so reading the why lines can't raise your score. Worlds from before quizzes keep their level points and take the quizzes to close their switches again.
 - **Graduation:** close every switch and the game opens a graduate screen. Put a display name on your card (up to 32 characters) and the server checks your world, then draws a card: the fully lit circuit with the DCH core powered, the levels the server verified for you (Level 0, every scored level and the Level 8 explainer, each with its quiz passed), your score and the date (UTC). Download the image or press **Share on X**, which opens X with the text filled in; nothing is posted until you press Post. The share link uses a random id, never your address.
 - **Amendment gating:** before a level relies on an amendment, the game asks the connected server with the [`feature`](https://xrpl.org/docs/references/http-websocket-apis/admin-api-methods/status-and-debugging-methods/feature) method. If it is not enabled there, the level shows **coming soon** instead of failing. See [Amendments](https://xrpl.org/docs/concepts/networks-and-servers/amendments) and [Known Amendments](https://xrpl.org/resources/known-amendments).
@@ -189,6 +191,40 @@ not on testnet**. Devnet is the default network, so these play out of the box (o
   maximum →
   [`tecLIMIT_EXCEEDED`](https://devnet.xrpl.org/transactions/CEE4DAA31F07F4428230153DB868FDB5D3870BFBCDF43159AA4858D373A3186A).
 
+## End-to-end playthrough (run it on your Mac)
+
+`npm run e2e` plays the live game like a phone player: Playwright headless Chromium at iPhone size,
+devnet or testnet only (it checks the server first and stops otherwise), no wallet app. It plays
+Level 0 through the graduate card, answers the quizzes from a test-only answer key
+(`e2e/lib.mjs`, never sent to the browser), and prints PASS/FAIL per level.
+
+Mac, one line (Node 22 or newer; get it from nodejs.org or `brew install node@22`):
+
+```sh
+git clone https://github.com/by-AiVibes/dch-tutorial-game.git && cd dch-tutorial-game && npm ci && npx playwright install chromium && npm run e2e -- --url https://game.dch.everhostx.com
+```
+
+Already cloned: `cd dch-tutorial-game && git pull && npm ci && npm run e2e -- --url https://game.dch.everhostx.com`
+
+More:
+
+```sh
+npm run e2e -- --url https://game.dch.everhostx.com --runs 3     # 3 runs in a row, one world
+npm run e2e -- --url https://game.dch.everhostx.com --level 7    # only Level 7 (earlier levels played first if needed)
+npm run e2e -- --url https://game.dch.everhostx.com --fresh      # new wallet + world (counts toward 3 per hour)
+npm run e2e -- --url https://game.dch.everhostx.com --wrong freeze --headed   # miss one quiz answer, watch it
+```
+
+Output in `./e2e-out/`: `report.md` (short and plain: the result, the fails, one line per level;
+easy to paste into a chat or a small local model), `report.json` (every step: time, on-screen error,
+API route + HTTP status + server error, console errors, screenshot, and a "likely code" hint for
+fails) and one screenshot per step. Exit code 0 = all PASS, 1 = a FAIL, 2 = setup problem.
+
+One world per run: the first run makes a test wallet and world and keeps only its **address** in
+`./.e2e-player.json`; later runs reuse that world (the server allows 3 new worlds per hour per IP).
+Seeds are never written anywhere; reports mask anything seed-shaped. A reused world that already
+graduated replays quickly (its levels are done); use `--fresh` for a full new playthrough.
+
 ## Layout
 
 ```
@@ -202,12 +238,15 @@ src/game.ts         engine: reset-world, play, serialized operations
 src/levels/         level definitions
 src/server.ts       JSON API + static dashboard (no framework)
 src/quizzes.ts      per-level quiz questions, answers and why lines (server-only)
+src/jobs.ts         background level runs the page polls (in memory, random ids, 15 min expiry)
 src/award.ts        graduation card: SVG, PNG render (resvg), share page with og/twitter tags
 assets/fonts/       DejaVu Sans (bundled for the card; license in FONT-LICENSE.txt)
 public/             UI (vanilla JS/CSS/SVG): circuit level map, step cards, guided pointer
   mapstate.js       pure map logic (which switches are closed), shared with the tests
 test/               fast unit tests
 scripts/check-card-scroll.mjs  headless 375px check: card titles stay visible after each Next
+scripts/play-through.mjs       headless 375px "real player" (CDP, no deps), used for dogfooding
+e2e/play.mjs, e2e/lib.mjs      `npm run e2e`: Playwright playthrough + report (answer key is test-only)
 ```
 
 See [docs/INSTRUCTOR.md](docs/INSTRUCTOR.md) for running a session and [DEPLOY.md](DEPLOY.md) for hosting notes.

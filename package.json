@@ -6,7 +6,8 @@
     "dch": "node src/cli.ts",
     "start": "node src/server.ts",
     "test": "node --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "node e2e/play.mjs"
   },
   "repository": {
     "type": "git",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "playwright": "1.65.1",
     "typescript": "^7.0.2"
   },
   "private": true,

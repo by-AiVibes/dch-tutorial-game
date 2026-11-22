@@ -15,7 +15,7 @@ export function stepper(ctx: LevelContext, results: TxResult[]) {
     const r = await ctx.submit(k, tx);
     results.push(r);
     if (PARTIAL_RERUN.includes(r.engineResult)) {
-      throw new Error(`${why} -> ${r.engineResult}: this level already partly ran in this world. Run reset-world to replay it cleanly.`);
+      throw new Error(`${why} -> ${r.engineResult}: this level already partly ran in your world. To replay it cleanly, press Restart my world in Tools (it makes fresh accounts).`);
     }
     if (!isOk(r)) throw new Error(`${why} -> ${r.engineResult}${r.validated ? "" : " (not validated)"}`);
     return r;

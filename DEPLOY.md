@@ -71,6 +71,7 @@ Plan, for later:
     (quizzes are checked on the server, so Level 8 counts).
 - Quizzes: `POST /api/quiz/answer {world, level, q, choice}` and `POST /api/quiz/retry {world, level}`.
   Answers never leave the server. Rate limit class `quiz`: 30/min per IP (`DCH_RL_QUIZ_MAX`).
+- Level runs from the page are background jobs (`"async": true`); the page polls `GET /api/jobs/<id>` every 3 s (rate class `read`, 120/min per IP). Jobs live in memory only (lost on restart; the score is saved in the world either way) and expire 15 minutes after they finish. Caddy needs no timeout change.
   - Classrooms behind one NAT share one IP: 30 players answering at once can hit it. Raise it for
     the session, e.g. `DCH_RL_QUIZ_MAX=300` (and `DCH_RL_<CLASS>_MAX` for other classes), then
     set it back.

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // End-to-end playthrough of the DCH Tutorial Game, the way a phone player plays it.
 //
-//   npm run e2e -- --url https://game.dch.everhostx.com
+//   npm run e2e -- --url http://127.0.0.1:8790
+//   npm run e2e -- --url https://your-game-host.example
 //
 // Playwright headless Chromium at iPhone size (375x667, Mobile Safari user agent), macOS or
 // Linux, Node 20+ (plain JS, no TypeScript imports: the server's 22.18 isn't needed here).

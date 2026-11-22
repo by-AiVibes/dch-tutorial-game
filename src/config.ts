@@ -67,7 +67,7 @@ export function assertTestNetworkId(id: number | undefined, expected: number): v
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): NetworkConfig {
-  const name = (env.XRPL_NETWORK ?? "devnet") as NetworkName; // devnet default: every level playable (Dave, Nov 21 2026)
+  const name = (env.XRPL_NETWORK ?? "devnet") as NetworkName; // devnet default: every level playable (as of Nov 21 2026)
   const base = NETWORKS[name];
   if (!base) throw new Error(`XRPL_NETWORK must be "testnet" or "devnet", got "${name}".`);
   const ws = env.XRPL_WS || base.ws;

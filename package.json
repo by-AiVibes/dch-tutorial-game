@@ -13,7 +13,7 @@
     "type": "git",
     "url": "git+https://github.com/by-AiVibes/dch-tutorial-game.git"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "bugs": {
     "url": "https://github.com/by-AiVibes/dch-tutorial-game/issues"

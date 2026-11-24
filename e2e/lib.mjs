@@ -24,7 +24,7 @@ export const ANSWER_KEY = {
     ["Who creates the credential?", "The issuer"],
   ],
   domain: [
-    ["Who can trade in a permissioned domain's DEX?", "The domain owner, plus accounts holding an accepted, unexpired credential the domain lists"],
+    ["Who can trade in a permissioned domain's DEX?", "Only accounts holding an accepted, unexpired credential the domain lists"],
     ["A bot with no KYC credential places an offer in the domain. Result?", "It's refused"],
     ["What does Level 4 build on from Level 3?", "The KYC credential"],
   ],

@@ -1,6 +1,8 @@
 // Network config. Test networks only: hosts must be on a test-host allowlist, and the
 // server must report network_id 1 (testnet) or 2 (devnet); mainnet is 0.
 
+import { join } from "node:path";
+
 export type NetworkName = "testnet" | "devnet";
 
 export interface NetworkConfig {
@@ -77,8 +79,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): NetworkConfig 
   return { ...base, ws, faucetHost };
 }
 
-/** Where local world state lives. Holds throwaway test seeds: gitignored, mode 0600, never printed. */
-export const DATA_DIR = process.env.DCH_DATA_DIR || ".data";
+/** Where local world state lives. Override with DCH_DATA_DIR. Holds throwaway test seeds: gitignored, mode 0600, never printed. */
+export function dataDir(env: NodeJS.ProcessEnv = process.env): string {
+  return env.DCH_DATA_DIR || ".data";
+}
+
+/** The stats file next to the worlds: $DCH_DATA_DIR/stats.json (default `.data/stats.json`). */
+export function statsPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(dataDir(env), "stats.json");
+}
+
+export const DATA_DIR = dataDir();
 
 /** Test currency code used by Level 1. */
 export const CURRENCY = "TST";

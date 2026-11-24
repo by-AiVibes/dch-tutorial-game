@@ -1,7 +1,6 @@
 // CLI: `npm run dch -- <command>`. Prints addresses, results and tx hashes; never seeds.
 
-import { join } from "node:path";
-import { DATA_DIR, loadConfig } from "./config.ts";
+import { loadConfig, statsPath } from "./config.ts";
 import { LEVELS } from "./levels/index.ts";
 import { formatStats, Stats } from "./stats.ts";
 import { Game } from "./game.ts";
@@ -18,7 +17,7 @@ const usage = `usage:
 async function main() {
   if (cmd === "stats") {
     // Reads the file the server writes; no network, no world access.
-    const path = join(DATA_DIR, "stats.json");
+    const path = statsPath();
     const data = Stats.read(path);
     if (!data) { console.log(`no stats yet (${path})`); return; }
     const s = new Stats(path, { network: data.network, flushMs: 1e9 });

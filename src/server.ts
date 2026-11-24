@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { DATA_DIR, loadConfig } from "./config.ts";
+import { loadConfig, statsPath } from "./config.ts";
 import { Stats } from "./stats.ts";
 import { Game } from "./game.ts";
 import { AWARD_ID_RE, awardHtml, awardPng, loadAward, publicBase } from "./award.ts";
@@ -67,8 +67,8 @@ export function statsAuthorized(header: string | undefined, token = process.env.
 }
 
 /** The stats file next to the worlds (DCH_DATA_DIR/stats.json), with testers excluded. */
-export function openStats(network: string) {
-  return new Stats(join(DATA_DIR, "stats.json"), { network, ignoreIps: process.env.DCH_STATS_IGNORE_IPS, ignoreUa: process.env.DCH_STATS_IGNORE_UA });
+export function openStats(network: string, env: NodeJS.ProcessEnv = process.env) {
+  return new Stats(statsPath(env), { network, ignoreIps: env.DCH_STATS_IGNORE_IPS, ignoreUa: env.DCH_STATS_IGNORE_UA });
 }
 
 export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv()), trustProxy = process.env.TRUST_PROXY === "1", jobs = new JobStore()) {

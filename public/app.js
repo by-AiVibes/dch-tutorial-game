@@ -216,6 +216,7 @@ function render() {
   const out = r.name === "level" ? levelScreen(r.id) : r.name === "tools" ? toolsScreen() : r.name === "graduate" ? graduateScreen() : mapScreen();
   if (!out) return;
   $("screen").replaceChildren(...out.nodes.filter(Boolean));
+  $("screen").classList.toggle("pin-nav", !!out.pinNav);
   if (screenKey !== lastScreen) { lastScreen = screenKey; window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }
   requestAnimationFrame(() => { pointer.set(out.target, out.hint); paintCelebrate(); });
   scheduleCelebrate();
@@ -278,16 +279,12 @@ const pointer = {
 addEventListener("resize", () => pointer.place());
 
 // ---- level-complete celebration: the map switch snaps, then the path lights, then Continue ----
+// Armed only after the player taps Continue. The animation may play; it never changes the route.
 let celebrate = null; // { id, t0, skipped, reduce, timer }
-let holdRender = false;
 function armCelebrate(id) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   clearTimeout(celebrate?.timer);
   celebrate = { id, t0: 0, skipped: reduce, reduce, timer: 0 };
-  // Hash change would render before the answer's refresh clears "busy". Hold that one render.
-  holdRender = true;
-  if (location.hash !== "#/map") location.hash = "#/map";
-  holdRender = false;
 }
 function frameNow() {
   if (!celebrate) return null;
@@ -462,7 +459,6 @@ function mapScreen() {
   const cur = ms.nodes.find((z) => z.id === ms.current);
   // "Start" only for a world with no progress at all; a world waiting on quizzes says Continue.
   const fresh = ms.doneCount === 0 && !ui.step.wallet && !state.score && !quizPending(state.levels, { walletDone: walletDone(), read: ui.read }).length;
-  if (ms.allComplete && !frame && addr() && !localStorage.getItem("dch-grad-seen")) { localStorage.setItem("dch-grad-seen", "1"); setTimeout(() => go("#/graduate")); }
   const gradBtn = ms.allComplete && !frame ? el("button", { class: "primary big", "data-pt": "graduate", on: { click: () => go("#/graduate") } }, "🎓 Get your graduate card") : null;
   const startBtn = !frame && cur ? el("button", { class: "primary big", "data-pt": "start", on: { click: () => go(`#/level/${cur.id}`) } },
     fresh ? "Start" : `Continue: Level ${cur.n} · ${cur.short}`) : null;
@@ -505,8 +501,16 @@ function levelScreen(id) {
   const nextFn = c.nextDisabled
     // Not answered yet: Next stays on this card, back at its top, and says what to do.
     ? () => { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); $("hint").textContent = c.hint || ""; }
-    : c.next || (() => (isLast ? go("#/map") : setIdx(idx + 1)));
-  const next = el("button", { class: "primary big" + (c.nextDisabled ? " is-off" : ""), "data-pt": `next-${idx}`, ...(busy ? { disabled: true } : {}), ...(c.nextDisabled ? { "aria-disabled": "true" } : {}), on: { click: nextFn } }, c.nextLabel || (isLast ? "Map" : "Next →"));
+    : c.hold
+      // A finished run stays on this card until Continue. Advance from the card on screen.
+      ? () => { c.next?.(); setIdx(idx + 1); }
+      : c.next || (() => (isLast ? go("#/map") : setIdx(idx + 1)));
+  const next = el("button", {
+    class: "primary big" + (c.nextDisabled ? " is-off" : ""), "data-pt": `next-${idx}`,
+    ...(c.hold ? { "data-continue": "run" } : {}),
+    ...(c.continueKind ? { "data-continue": c.continueKind } : {}),
+    ...(busy ? { disabled: true } : {}), ...(c.nextDisabled ? { "aria-disabled": "true" } : {}), on: { click: nextFn },
+  }, c.nextLabel || (isLast ? "Map" : "Next →"));
   keys.back = () => back.click();
   keys.next = () => { if (!next.disabled) next.click(); };
   const more = c.more === false ? null : el("details", { class: "more" }, el("summary", {}, "Learn more"),
@@ -517,10 +521,16 @@ function levelScreen(id) {
       el("div", { class: "dots", "aria-label": `Step ${idx + 1} of ${cards.length}` }, cards.map((_, i) => el("span", { class: "dot" + (i === idx ? " on" : i < idx ? " past" : "") })))),
     el("section", { class: "card", "aria-labelledby": "cardtitle" },
       el("h2", { id: "cardtitle" }, c.title), c.diag ? diagram(c.diag) : null, ...c.body, more),
-    el("div", { class: "navrow" }, back, next),
+    el("div", { class: "navrow" + (c.hold ? " pinned" : "") }, back, next),
   ];
-  const target = busy ? null : c.target && c.target() ? c.target() : c.nextDisabled ? null : next;
-  return { nodes, target, hint: busy ? (busy === "quiz" ? "Checking your answer…" : "Working on the ledger…") : c.target && c.target() ? c.hint : c.nextDisabled ? (c.hint || "") : isLast ? (c.nextHint || "All set. Press the button to continue.") : "Press Next →" };
+  const target = busy ? null : c.hold ? next : c.target && c.target() ? c.target() : c.nextDisabled ? null : next;
+  const hint = busy ? (busy === "quiz" ? "Checking your answer…" : "Working on the ledger…")
+    : c.hold ? (c.hint || "Read the run, then press Continue.")
+    : c.target && c.target() ? c.hint
+    : c.nextDisabled ? (c.hint || "")
+    : isLast ? (c.nextHint || "All set. Press the button to continue.")
+    : "Press Next →";
+  return { nodes, target, hint, pinNav: !!c.hold };
 }
 
 /** A level whose earlier switch is still open: say so and point at the level to play. */
@@ -572,9 +582,11 @@ function finishCard(l, title, lead) {
   const nx = nextLevelAfter(l);
   return {
     title, body: [el("p", { class: "lead" }, lead)], more: false, diag: "done",
-    nextLabel: nx ? `Level ${nx.n} →` : "Back to the map",
-    nextHint: nx ? `Next: Level ${nx.n}. Press the button.` : "Back to your circuit.",
-    next: () => { if (nx) { ui.step[nx.id] = ui.step[nx.id] || 0; saveUi(); go(`#/level/${nx.id}`); } else go("#/map"); },
+    continueKind: "level",
+    nextLabel: "Continue",
+    nextHint: nx ? `Next: Level ${nx.n}. Press Continue.` : "Back to your circuit. Press Continue.",
+    // The tap opens the map. The switch animation plays there and does not move on by itself.
+    next: () => { armCelebrate(l.id); go("#/map"); },
   };
 }
 
@@ -611,10 +623,8 @@ function quizCards(l, firstIdx) {
     try {
       const res = await api("/api/quiz/answer", { world: addr(), level: l.id, q: i, choice: k });
       quizMsg[l.id] = "";
-      if (res && res.passed) {
-        if (res.view) state = res.view;
-        armCelebrate(l.id);
-      }
+      // A passed quiz stays on this question so the result can be read. Continue is the way on.
+      if (res && res.view) state = res.view;
     } catch (e) { quizMsg[l.id] = e.message; }
   });
   const retry = () => act("quiz", async () => {
@@ -733,14 +743,24 @@ function scoredCards(l) {
   const run = (part) => act(part, async () => {
     res.wait = "";
     res.live = { events: [], ledger: null };
+    res.hold = null;
     try { res[part] = await runLevel(l.id, part, (m) => { if (res.wait !== m) { res.wait = m; render(); } }, (live) => { res.live = live; render(); }); }
     catch (e) { res[part] = { ok: false, message: "Error: " + e.message }; }
     res.wait = "";
+    // The poll (and the live stream) finishing must not leave this card. Continue does.
+    res.hold = part;
   });
   const waitNote = l.id === "lend" ? "This one waits for the vault's investment phase: usually about a minute, sometimes a few." : "Ledger steps take a few seconds each.";
-  const working = (part) => busy === part ? el("div", { class: "liverun" },
-    el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), `Working on ${state.network}… ${waitNote}`, res.wait ? el("span", { class: "note" }, " " + res.wait) : null),
-    runLog(res.live), networkPanel(res.live)) : null;
+  const liveView = (part) => {
+    const running = busy === part;
+    // Keep the log up after the job finishes, until Continue clears the hold.
+    const held = res.hold === part;
+    if (!running && !held) return null;
+    return el("div", { class: "liverun" },
+      running ? el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), `Working on ${state.network}… ${waitNote}`, res.wait ? el("span", { class: "note" }, " " + res.wait) : null) : null,
+      runLog(res.live), networkPanel(res.live));
+  };
+  const releaseHold = () => { res.hold = null; };
   const roleList = l.goalRoles.join(", ");
 
   let goalBtn, failBtn;
@@ -760,25 +780,31 @@ function scoredCards(l) {
         el("div", { class: "act" }, goalBtn = noWorld
           ? el("button", { class: "primary big", "data-pt": "to-l0", on: { click: toLevel0 } }, "Go to Level 0")
           : el("button", { class: "primary big", "data-pt": "run-goal", ...(busy || l.score.goal ? { disabled: true } : {}), on: { click: () => run("goal") } }, "Run level")),
-        working("goal"), resultBox(res.goal),
+        liveView("goal"), resultBox(res.goal),
       ],
       more: false,
+      hold: res.hold === "goal" && !!l.score.goal,
+      nextLabel: res.hold === "goal" && l.score.goal ? "Continue" : undefined,
+      next: res.hold === "goal" && l.score.goal ? releaseHold : undefined,
       target: () => (!l.score.goal && !busy ? goalBtn : null),
       nextDisabled: !l.score.goal, // the goal must clear before the level moves on
-      hint: noWorld ? "Build your world in Level 0 first." : "Press Run level.",
+      hint: res.hold === "goal" ? "Read the run, then press Continue." : noWorld ? "Build your world in Level 0 first." : "Press Run level.",
     },
     {
       title: l.score.shouldFail ? "Broken on purpose ✓" : "Now break it", diag: `${l.id}:fail`,
       body: [
         el("p", { class: "lead" }, l.shouldFail),
         el("div", { class: "act" }, failBtn = el("button", { class: "primary big", "data-pt": "run-fail", ...(busy || !state.world || l.score.shouldFail ? { disabled: true } : {}), on: { click: () => run("shouldFail") } }, "Try it (+5)")),
-        working("shouldFail"), resultBox(res.shouldFail),
+        liveView("shouldFail"), resultBox(res.shouldFail),
         l.score.shouldFail && l.rejectReason ? el("p", { class: "note" }, "Why it fails: " + l.rejectReason) : null,
       ],
       more: false,
+      hold: res.hold === "shouldFail" && !!l.score.shouldFail,
+      nextLabel: res.hold === "shouldFail" && l.score.shouldFail ? "Continue" : undefined,
+      next: res.hold === "shouldFail" && l.score.shouldFail ? releaseHold : undefined,
       target: () => (!l.score.shouldFail && !busy ? failBtn : null),
       nextDisabled: !l.score.shouldFail,
-      hint: "Press Try it. The ledger should refuse it.",
+      hint: res.hold === "shouldFail" ? "Read the run, then press Continue." : "Press Try it. The ledger should refuse it.",
     },
   ];
   const pts = (l.score.goal ? 10 : 0) + (l.score.shouldFail ? 5 : 0) + (l.score.goal && l.score.shouldFail ? 5 : 0);
@@ -954,5 +980,5 @@ $("home").addEventListener("click", () => go("#/map"));
 $("nav-map").addEventListener("click", () => go("#/map"));
 $("nav-tools").addEventListener("click", () => go("#/tools"));
 if ("scrollRestoration" in history) history.scrollRestoration = "manual"; // the browser must not restore an old offset onto a new card
-addEventListener("hashchange", () => { if (holdRender) return; render(); $("screen").focus({ preventScroll: true }); });
+addEventListener("hashchange", () => { render(); $("screen").focus({ preventScroll: true }); });
 refresh().catch((e) => { $("screen").replaceChildren(el("p", { class: "result bad" }, "Server not reachable: " + e.message)); });

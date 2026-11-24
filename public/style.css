@@ -112,6 +112,9 @@ footer { color: var(--mut); font-size: 13px; text-align: center; padding: 10px; 
 .card .act { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .card .grow { flex: 1; }
 .navrow { display: flex; justify-content: space-between; gap: 10px; max-width: 620px; margin: 14px auto 0; }
+.navrow.pinned { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; max-width: none; margin: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 10px 14px calc(12px + env(safe-area-inset-bottom, 0px)); }
+.navrow.pinned button.big { flex: 1; min-height: 48px; }
+main.pin-nav { padding-bottom: 96px; }
 .result { padding: 10px 12px; border-radius: 10px; background: #11151c; border-left: 4px solid var(--acc); white-space: pre-wrap; }
 .result.ok { border-color: var(--ok); } .result.bad { border-color: var(--warn); }
 .result a { margin-right: 8px; }

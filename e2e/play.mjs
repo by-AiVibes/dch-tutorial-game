@@ -29,7 +29,7 @@
 //   --out <dir>        output folder (default ./e2e-out)   --headed   --max-minutes <n> (default 30 per run)
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { ANSWER_KEY, headline, likelyCode, networkAmendments, scrub, skipVerdict } from "./lib.mjs";
+import { ANSWER_KEY, finishedStreamAbort, headline, likelyCode, networkAmendments, noteJobDone, scrub, skipVerdict } from "./lib.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : true) : dflt; };
@@ -89,15 +89,26 @@ const ctx = await browser.newContext({
 const page = await ctx.newPage();
 if (LATENCY > 0) await page.route(`${BASE}/api/**`, async (r) => { await sleep(LATENCY); await r.continue(); });
 let apiLog = [], consoleLog = [], shotN = 0;
+const jobsDone = new Set();
+let apiSettled = Promise.resolve();
 page.on("console", (m) => { if (m.type() === "error") consoleLog.push(scrub(m.text())); });
 page.on("pageerror", (e) => consoleLog.push(scrub(e.message)));
-page.on("response", async (r) => {
+page.on("response", (r) => {
   const u = new URL(r.url());
   const route = u.origin === new URL(BASE).origin ? u.pathname : `${u.host}${u.pathname}`;
   if (!route.startsWith("/api/") && !route.startsWith("/award/") && !route.includes("faucet")) return;
-  const e = { route: route.replace(/\/api\/account\/[^/]+/, "/api/account").replace(/\/api\/jobs\/[^/]+/, "/api/jobs/<id>").replace(/\/award\/[^/.]+/, "/award/<id>"), method: r.request().method(), status: r.status() };
-  if (r.status() >= 400) { try { const j = await r.json(); e.error = scrub(j.error || JSON.stringify(j)); } catch { e.error = r.statusText(); } }
-  apiLog.push(e);
+  const task = (async () => {
+    const poll = u.origin === new URL(BASE).origin && r.request().method() === "GET" ? /^\/api\/jobs\/([^/]+)$/.exec(u.pathname) : null;
+    let body = null;
+    if ((poll && r.status() === 200) || r.status() >= 400) {
+      try { body = await r.json(); } catch { body = null; }
+    }
+    if (poll) noteJobDone(body, decodeURIComponent(poll[1]), jobsDone);
+    const e = { route: route.replace(/\/api\/account\/[^/]+/, "/api/account").replace(/\/api\/jobs\/[^/]+/, "/api/jobs/<id>").replace(/\/award\/[^/.]+/, "/award/<id>"), method: r.request().method(), status: r.status() };
+    if (r.status() >= 400) e.error = body ? scrub(body.error || JSON.stringify(body)) : r.statusText();
+    apiLog.push(e);
+  })();
+  apiSettled = apiSettled.then(() => task).catch(() => {});
 });
 page.on("requestfailed", (q) => { const u = new URL(q.url()); apiLog.push({ route: u.pathname, method: q.method(), status: 0, error: scrub(q.failure()?.errorText || "request failed") }); });
 
@@ -121,6 +132,7 @@ const read = () => page.evaluate(() => {
     address: localStorage.getItem("dch-wallet-address") || "",
     celebrate: document.body.dataset.celebrate || "",
     animDone: document.body.dataset.animDone === "1",
+    cont: document.querySelector("[data-continue]")?.getAttribute("data-continue") || "",
   };
 });
 const click = (pt) => page.locator(`[data-pt="${pt}"]`).first().click({ timeout: 10_000 });
@@ -151,7 +163,9 @@ async function playOnce(run) {
     while (after.busy && Date.now() - t < 10 * 60_000) { await sleep(1000); after = await read().catch(() => after); }
     await sleep(250);
     after = await read().catch(() => after);
-    const apiFails = apiLog.filter((a) => a.status === 0 || a.status >= 400);
+    await apiSettled;
+    // A stream that closes after its job's poll says done is the designed 4s grace, not a failure.
+    const apiFails = apiLog.filter((a) => (a.status === 0 || a.status >= 400) && !finishedStreamAbort(a, jobsDone));
     const screenErr = after.bad && !/^Not quite/.test(after.bad) ? scrub(after.bad) : "";
     const errorText = err || screenErr || apiFails.map((a) => `${a.method} ${a.route} ${a.status} ${a.error || ""}`.trim()).join("; ");
     const level = levelOf(s.hash);
@@ -180,8 +194,8 @@ async function playOnce(run) {
   while (Date.now() - t0 < MAX_MS) {
     const s = await read();
     if (s.address && (!saved || saved.address !== s.address)) { saved = { url: BASE, address: s.address, createdAt: new Date().toISOString() }; writeFileSync(PLAYER_FILE, JSON.stringify(saved, null, 2) + "\n"); }
-    // A passed quiz plays the map animation before Continue appears. Tap skips to the end
-    // state (the page does that for any tap), then the next loop presses Continue.
+    // A passed quiz stays on the question until Continue, which opens the map animation.
+    // Tap skips to the end state (the page does that for any tap), then the next loop presses Continue.
     if (s.celebrate && !s.animDone) {
       await page.locator("body").click({ position: { x: 16, y: 96 }, force: true });
       await page.waitForFunction(() => document.body.dataset.animDone === "1", null, { timeout: 4000 }).catch(() => {});
@@ -233,6 +247,8 @@ async function playOnce(run) {
       await step(s, `answer Q${hit + 1}`, () => click(pick.pt));
       continue;
     }
+    // A finished run, and the end of a level, wait for an explicit Continue tap.
+    if (s.cont === "run" || s.cont === "level") { await step(s, "continue", () => page.locator(`[data-continue="${s.cont}"]`).first().click({ timeout: 10_000 })); continue; }
     if (s.target) { await step(s, s.target, () => click(s.target)); continue; }
     if (s.next && !s.next.off) { await step(s, "next", () => click(s.next.pt)); continue; }
     // Nothing to press right now: give a slow response a moment before calling it a dead end.

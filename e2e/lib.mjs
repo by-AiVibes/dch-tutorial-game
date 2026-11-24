@@ -124,3 +124,30 @@ export function skipVerdict(level, network, report) {
 export function headline(pass, skipped) {
   return pass ? (skipped ? `PASS (${skipped} skipped)` : "PASS") : "FAIL";
 }
+
+const STREAM_PATH = /^\/api\/jobs\/([^/]+)\/stream$/;
+
+/** Job id from a /api/jobs/<id>/stream URL or path. Empty for every other path. */
+export function streamJobId(route) {
+  const path = String(route || "").replace(/^https?:\/\/[^/]+/i, "");
+  const m = STREAM_PATH.exec(path);
+  if (!m || m[1] === "<id>") return "";
+  try { return decodeURIComponent(m[1]); } catch { return ""; }
+}
+
+/** Remember a job poll. Only a body whose status is "done" counts; running and error do not. */
+export function noteJobDone(body, id, doneJobs) {
+  if (body && body.status === "done" && id) doneJobs.add(id);
+}
+
+/**
+ * A Playwright requestfailed entry to ignore: ERR_ABORTED on /api/jobs/<id>/stream
+ * after that job's poll already showed done. Any other status, error, or path stays a failure,
+ * including an abort of the stream before the poll shows done.
+ */
+export function finishedStreamAbort(entry, doneJobs) {
+  if (!entry || entry.status !== 0) return false;
+  if (!String(entry.error || "").includes("ERR_ABORTED")) return false;
+  const id = streamJobId(entry.route);
+  return !!id && !!doneJobs && doneJobs.has(id);
+}

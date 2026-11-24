@@ -39,7 +39,7 @@ A 45–60 minute session for developers who know basic XRPL concepts (accounts, 
 | 1 Rippling | DefaultRipple on the issuer; NoRipple on holders | `tecPATH_DRY` | [Rippling](https://xrpl.org/docs/concepts/tokens/fungible-tokens/rippling) |
 | 2 Freeze/clawback | Clawback must be enabled before the issuer owns objects; `Amount.issuer` is the holder | `tecNO_PERMISSION` | [Clawback](https://xrpl.org/docs/concepts/tokens/fungible-tokens/clawing-back-tokens) |
 | 3 Credentials | A credential is in force only after the subject accepts it | `tecNO_ENTRY` | [Credentials](https://xrpl.org/docs/concepts/decentralized-storage/credentials) |
-| 4 Domains | Domains list accepted credentials; the permissioned DEX enforces them | `tecNO_PERMISSION` | [Permissioned domains](https://xrpl.org/docs/concepts/tokens/decentralized-exchange/permissioned-domains) |
+| 4 Permissioned Domains | Domains list accepted credentials; the permissioned DEX enforces them | `tecNO_PERMISSION` | [Permissioned domains](https://xrpl.org/docs/concepts/tokens/decentralized-exchange/permissioned-domains) |
 | 5 Batch | All-or-nothing: the outer Batch can be `tesSUCCESS` while inner txs roll back — check the ledger | (none applied) | [Batch](https://xrpl.org/docs/concepts/transactions/batch-transactions) |
 | 6 Vault | Deposits mint shares; withdrawals burn shares | `tecINSUFFICIENT_FUNDS` | [Single asset vaults](https://xrpl.org/docs/concepts/tokens/single-asset-vaults) |
 | 7 Lending | Broker on a vault, first-loss capital, co-signed LoanSet; with LendingProtocolV1_1, closed-ended vaults and phases | `tecLIMIT_EXCEEDED` | [Lending protocol](https://xrpl.org/docs/concepts/tokens/lending-protocol) |

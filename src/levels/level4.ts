@@ -1,4 +1,4 @@
-// Level 4: permissioned domain. The domain lists accepted credentials; only accounts holding
+// Level 4: Permissioned Domains. The domain lists accepted credentials; only accounts holding
 // one can place offers in that domain's permissioned DEX.
 // Facts: https://xrpl.org/docs/concepts/tokens/decentralized-exchange/permissioned-domains
 //        https://xrpl.org/docs/concepts/tokens/decentralized-exchange/permissioned-dexes
@@ -22,7 +22,7 @@ async function ensureDomain(ctx: LevelContext, results: TxResult[]): Promise<str
   const r = await step("issuer", {
     TransactionType: "PermissionedDomainSet",
     AcceptedCredentials: [{ Credential: { Issuer: ctx.address("issuer"), CredentialType: KYC_TYPE } }],
-  }, "Issuer creates a domain that accepts its DCH-KYC credential");
+  }, "Issuer creates a domain that accepts its KYC credential");
   const id = r.created?.PermissionedDomain;
   if (!id) throw new Error("no PermissionedDomain in metadata");
   ctx.memo.domainId = id;
@@ -35,7 +35,7 @@ async function tryOffer(ctx: LevelContext, who: AccountKey, DomainID: string, wh
 }
 
 async function runGoal(ctx: LevelContext): Promise<StepOutcome> {
-  if (!ctx.memoOf("creds").goalDone) return { ok: false, message: "Clear the Level 3 goal first (the holder needs an accepted DCH-KYC credential).", results: [] };
+  if (!ctx.memoOf("creds").goalDone) return { ok: false, message: "Clear the Level 3 goal first (the holder needs an accepted KYC credential).", results: [] };
   const results: TxResult[] = [];
   try {
     const DomainID = await ensureDomain(ctx, results);
@@ -53,7 +53,7 @@ async function runShouldFail(ctx: LevelContext): Promise<StepOutcome> {
   const results: TxResult[] = [];
   try {
     const DomainID = await ensureDomain(ctx, results);
-    const attempt = await tryOffer(ctx, "holderBot", DomainID, "Holder bot, without a DCH-KYC credential, tries to trade in the domain");
+    const attempt = await tryOffer(ctx, "holderBot", DomainID, "Holder bot, without a KYC credential, tries to trade in the domain");
     results.push(attempt);
     return { ok: true, message: `Ledger said ${attempt.engineResult}.`, results, attempt };
   } catch (e) {

@@ -1,7 +1,7 @@
 {
   "name": "dch-tutorial-game",
   "version": "0.1.0",
-  "description": "DCH Tutorial Game: learn the XRP Ledger by playing levels on testnet/devnet.",
+  "description": "XRPL Amendments Tutorial: learn the XRP Ledger by playing levels on testnet/devnet.",
   "scripts": {
     "dch": "node src/cli.ts",
     "start": "node src/server.ts",

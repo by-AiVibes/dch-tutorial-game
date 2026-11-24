@@ -225,5 +225,5 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   server.requestTimeout = 30_000;
   server.keepAliveTimeout = 5_000;
   server.maxHeadersCount = 50;
-  server.listen(PORT, HOST, () => console.log(`DCH tutorial game on http://${HOST}:${PORT} (${game.cfg.name})`));
+  server.listen(PORT, HOST, () => console.log(`XRPL Amendments Tutorial on http://${HOST}:${PORT} (${game.cfg.name})`));
 }

@@ -129,3 +129,37 @@ test("amendments: vault gate also needs MPTokensV1", () => {
   const rep: AmendmentReport = { checkedAt: "", network: "devnet", amendments: parseFeatures({ a: { name: "SingleAssetVault", enabled: true } }) };
   assert.ok(!featureEnabled(rep, "SingleAssetVault"));
 });
+
+test("on-ledger credential types are the neutral names", async () => {
+  const { convertStringToHex } = await import("xrpl");
+  const { KYC_TYPE } = await import("../src/levels/level3.ts");
+  const { BATCH_TYPE, HALF_TYPE, NONE_TYPE } = await import("../src/levels/level5.ts");
+  const { QUIZZES } = await import("../src/quizzes.ts");
+  const pairs: Array<[string, string]> = [
+    ["KYC", KYC_TYPE],
+    ["BATCH", BATCH_TYPE],
+    ["HALF", HALF_TYPE],
+    ["NONE", NONE_TYPE],
+  ];
+  for (const [name, encoded] of pairs) {
+    assert.equal(encoded, convertStringToHex(name), `${name} is the hex sent as CredentialType`);
+    assert.equal(Buffer.from(encoded, "hex").toString("utf8"), name);
+    assert.notEqual(encoded, convertStringToHex(`DCH-${name}`), `${name} must not still be encoded as DCH-${name}`);
+  }
+  const { summarize } = await import("../src/game.ts");
+  assert.equal(summarize({ LedgerEntryType: "Credential", CredentialType: KYC_TYPE, Flags: 0x10000 }), "KYC accepted");
+  assert.equal(summarize({ LedgerEntryType: "Credential", CredentialType: BATCH_TYPE, Flags: 0 }), "BATCH not accepted");
+  assert.equal(summarize({ LedgerEntryType: "Credential", CredentialType: HALF_TYPE, Flags: 0x10000 }), "HALF accepted");
+  assert.equal(summarize({ LedgerEntryType: "Credential", CredentialType: NONE_TYPE, Flags: 0 }), "NONE not accepted");
+  const domain = LEVELS.find((l) => l.n === 4);
+  assert.equal(domain?.id, "domain");
+  assert.equal(domain?.title, "Permissioned Domains");
+  assert.doesNotMatch(JSON.stringify(LEVELS), /DCH-/);
+  assert.match(LEVELS.find((l) => l.id === "creds")!.shouldFail, /\bKYC\b/);
+  assert.match(domain!.goal, /\bKYC\b/);
+  assert.match(domain!.shouldFail, /no KYC credential/);
+  assert.doesNotMatch(JSON.stringify(QUIZZES), /DCH-/);
+  assert.match(QUIZZES.domain[1].q, /no KYC credential/);
+  assert.equal(QUIZZES.domain[2].choices[QUIZZES.domain[2].answer], "The KYC credential");
+  assert.match(QUIZZES.domain[2].why, /issuer's KYC credential/);
+});

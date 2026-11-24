@@ -140,7 +140,7 @@ function board(ox: number, oy: number, S: number, levels: AwardLevel[]): string 
   }
   out.push(`<rect x="${f(x0)}" y="${f(y0)}" width="${f(cs)}" height="${f(cs)}" rx="12" fill="#2b2510" stroke="#ffd34d" stroke-width="4" filter="url(#glow)"/>`);
   out.push(`<circle cx="${f(x0 + 18)}" cy="${f(y0 + 18)}" r="5" fill="#3fb950"/>`);
-  out.push(`<text x="${cx}" y="${f(cy - 16)}" text-anchor="middle" font-size="15" font-weight="bold" letter-spacing="2" fill="#ffd34d">DCH CORE</text>`);
+  out.push(`<text x="${cx}" y="${f(cy - 16)}" text-anchor="middle" font-size="15" font-weight="bold" letter-spacing="2" fill="#ffd34d">CORE</text>`);
   out.push(`<text x="${cx}" y="${f(cy + 18)}" text-anchor="middle" font-size="32" font-weight="bold" fill="#fff6c9">${N}/${N}</text>`);
   out.push(`<text x="${cx}" y="${f(cy + 40)}" text-anchor="middle" font-size="13" font-weight="bold" letter-spacing="2" fill="#ffd34d">POWERED</text>`);
   // closed switches
@@ -186,9 +186,9 @@ ${board(40, 37, 600, rec.levels)}
 <text x="${X}" y="78" font-size="17" font-weight="bold" letter-spacing="2" fill="#7ee2a8">#XRPEducationMonth</text>
 <text x="1160" y="78" text-anchor="end" font-size="17" fill="#9aa3b2">${esc(fmtDate(rec.date))} UTC</text>
 <rect x="${X}" y="100" width="480" height="74" rx="14" fill="#2b2510" stroke="#ffd34d" stroke-width="3"/>
-<text x="${X + 240}" y="148" text-anchor="middle" font-size="36" font-weight="bold" letter-spacing="5" fill="#ffd34d">DCH GRADUATE</text>
+<text x="${X + 240}" y="148" text-anchor="middle" font-size="36" font-weight="bold" letter-spacing="5" fill="#ffd34d">GRADUATE</text>
 <text x="${X}" y="${nameSize > 40 ? 250 : 244}" font-size="${nameSize}" font-weight="bold" fill="#ffffff">${name}</text>
-<text x="${X}" y="292" font-size="19" fill="#9aa3b2">has completed the DCH Tutorial on XRPL ${esc(rec.network)}</text>
+<text x="${X}" y="292" font-size="19" fill="#9aa3b2">has completed the XRPL Amendments Tutorial on XRPL ${esc(rec.network)}</text>
 <text x="${X}" y="330" font-size="24" font-weight="bold" letter-spacing="3" fill="#ffd34d">CIRCUIT COMPLETE ⚡</text>
 ${rows}
 <rect x="${X + 245}" y="535" width="235" height="42" rx="21" fill="#2b2510" stroke="#ffd34d" stroke-width="2"/>
@@ -223,8 +223,8 @@ export function awardPng(rec: AwardRecord): Buffer {
 
 /** The share page: Open Graph + Twitter tags so the link previews with the card on X. */
 export function awardHtml(rec: AwardRecord, base: string | null): string {
-  const title = `${rec.name}: DCH Graduate, circuit complete`;
-  const desc = `Completed all ${rec.levels.length} required levels of the DCH Tutorial on XRPL ${rec.network}. Score ${rec.score}/${rec.maxScore}. #XRPEducationMonth`;
+  const title = `${rec.name}: Graduate, circuit complete`;
+  const desc = `Completed all ${rec.levels.length} required levels of the XRPL Amendments Tutorial on XRPL ${rec.network}. Score ${rec.score}/${rec.maxScore}. #XRPEducationMonth`;
   const page = base ? `${base}/award/${rec.id}` : null, img = page ? `${page}.png` : null;
   // Without a known public base, absolute og:url / og:image are omitted rather than guessed.
   const abs = page && img ? `
@@ -232,7 +232,7 @@ export function awardHtml(rec: AwardRecord, base: string | null): string {
 <meta property="og:image" content="${esc(img)}">
 <meta property="og:image:width" content="${CARD_W}">
 <meta property="og:image:height" content="${CARD_H}">
-<meta property="og:image:alt" content="${esc(`DCH Graduate card for ${rec.name}: a fully lit circuit board ring with the DCH core powered, ${rec.score}/${rec.maxScore}`)}">
+<meta property="og:image:alt" content="${esc(`Graduate card for ${rec.name}: a fully lit circuit board ring with the core powered, ${rec.score}/${rec.maxScore}`)}">
 <meta name="twitter:image" content="${esc(img)}">` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -249,9 +249,9 @@ export function awardHtml(rec: AwardRecord, base: string | null): string {
 <link rel="stylesheet" href="/award.css">
 </head><body>
 <main class="award-page">
-<img src="/award/${esc(rec.id)}.png" width="${CARD_W}" height="${CARD_H}" alt="${esc(`DCH Graduate card for ${rec.name}`)}">
-<p>${esc(rec.name)} powered the full DCH circuit: all ${rec.levels.length} required levels of hands-on XRPL development on ${esc(rec.network)}.</p>
-<p><a class="cta" href="/">Play the DCH Tutorial and get your card</a></p>
+<img src="/award/${esc(rec.id)}.png" width="${CARD_W}" height="${CARD_H}" alt="${esc(`Graduate card for ${rec.name}`)}">
+<p>${esc(rec.name)} powered the full circuit: all ${rec.levels.length} required levels of hands-on XRPL development on ${esc(rec.network)}.</p>
+<p><a class="cta" href="/">Play the XRPL Amendments Tutorial and get your card</a></p>
 <p class="small">Test networks only, no real funds. Facts link to <a href="https://xrpl.org">xrpl.org</a>.</p>
 </main>
 </body></html>`;

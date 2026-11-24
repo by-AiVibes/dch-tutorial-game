@@ -256,7 +256,7 @@ export function formatStats(s: ReturnType<Stats["snapshot"]>, levelIds: string[]
   const L = s.lifetime;
   const per = (r: Record<string, number>) => levelIds.map((id) => `${id} ${r[id] ?? 0}`).join(", ");
   const lines = [
-    `DCH stats (${s.network}), since ${s.since}${s.backfill ? `; backfilled ${s.backfill.worlds} worlds, ${s.backfill.awards} awards at ${s.backfill.at}` : ""}`,
+    `XRPL Amendments Tutorial stats (${s.network}), since ${s.since}${s.backfill ? `; backfilled ${s.backfill.worlds} worlds, ${s.backfill.awards} awards at ${s.backfill.at}` : ""}`,
     "",
     `Lifetime: visitors ${L.visitors} (sum of daily uniques), page views ${L.pageViews}, card views ${L.awardViews}, worlds started ${L.worldsStarted}, graduates ${L.graduates}, avg first-try quiz points ${L.avgFirstTryQuizPoints ?? "-"}/30`,
     `  levels completed: ${per(L.levelsCompleted)}`,

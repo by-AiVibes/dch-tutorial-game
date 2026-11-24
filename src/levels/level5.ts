@@ -10,6 +10,11 @@ import { hex, ledgerEntry } from "./util.ts";
 
 const INNER = GlobalFlags.tfInnerBatchTxn;
 
+/** On-ledger credential type strings for the batch level (hex-encoded, not labels). */
+export const BATCH_TYPE = hex("BATCH");
+export const HALF_TYPE = hex("HALF");
+export const NONE_TYPE = hex("NONE");
+
 /** Build, co-sign (holderBot) and submit an all-or-nothing batch from the issuer. */
 async function submitBatch(ctx: LevelContext, createType: string, acceptType: string): Promise<TxResult> {
   const issuer = ctx.wallet("issuer");
@@ -32,7 +37,7 @@ async function submitBatch(ctx: LevelContext, createType: string, acceptType: st
 }
 
 async function runGoal(ctx: LevelContext): Promise<StepOutcome> {
-  const t = hex("DCH-BATCH");
+  const t = BATCH_TYPE;
   ctx.note("Issuer submits one batch: create a credential for holderBot AND holderBot accepts it");
   const r = await submitBatch(ctx, t, t);
   const accepted = await credentialAccepted(ctx, ctx.address("holderBot"), ctx.address("issuer"), t);
@@ -41,11 +46,11 @@ async function runGoal(ctx: LevelContext): Promise<StepOutcome> {
 }
 
 async function runShouldFail(ctx: LevelContext): Promise<StepOutcome> {
-  // Create DCH-HALF, but accept a type that was never created. The accept can't succeed,
+  // Create HALF, but accept a type that was never created. The accept can't succeed,
   // so all-or-nothing must roll back the create too.
-  const half = hex("DCH-HALF");
+  const half = HALF_TYPE;
   ctx.note("Batch where the accept can't succeed (wrong type): the create must not land either");
-  const r = await submitBatch(ctx, half, hex("DCH-NONE"));
+  const r = await submitBatch(ctx, half, NONE_TYPE);
   const created = await ledgerEntry(ctx, { credential: { subject: ctx.address("holderBot"), issuer: ctx.address("issuer"), credential_type: half } });
   // Counts as a correct rejection only if the outer Batch itself was validated tesSUCCESS
   // (so the batch was really processed) AND the inner create did not land.

@@ -1,4 +1,4 @@
-// DCH game UI: a circuit-board level map (home) plus short step cards per level, with a
+// Game UI: a circuit-board level map (home) plus short step cards per level, with a
 // guided pointer at the next thing to click. Uses textContent everywhere (no innerHTML with data).
 // Only UI position is kept in localStorage (never a seed); game progress comes from the server,
 // from the player's OWN world, keyed by their wallet address (?world=<address>).
@@ -240,7 +240,7 @@ function mapScreen() {
     ...pins,
     svg("rect", { class: "chip", x: cx0, y: cy0, width: cs, height: cs, rx: 10 }),
     svg("circle", { class: "chipdot", cx: cx0 + 14, cy: cy0 + 14, r: 4 }),
-    svg("text", { class: "chiplabel", x: L.cx, y: L.cy - 12 }, "DCH CORE"),
+    svg("text", { class: "chiplabel", x: L.cx, y: L.cy - 12 }, "CORE"),
     svg("text", { class: "chipcount", x: L.cx, y: L.cy + 16 }, `${ms.doneCount}/${ms.total}`),
     svg("text", { class: "chipsub", x: L.cx, y: L.cy + 34 }, ms.allComplete ? "POWERED" : "switches"),
     svg("title", {}, `Core chip: ${ms.doneCount} of ${ms.total} switches closed`)));
@@ -696,7 +696,7 @@ function graduateScreen() {
     } catch (e) { grad.msg = e.message; }
   }) } }, id ? "Update name" : "Make my card");
   const nodes = [el("div", { class: "card grad" },
-    el("h2", {}, "🎓 DCH Graduate"),
+    el("h2", {}, "🎓 Graduate"),
     el("p", { class: "lead" }, "You powered the full circuit. Put your name on your card and share it."),
     el("label", { for: "grad-name", class: "lab" }, "Name on your card (up to 32 characters)"),
     el("div", { class: "act" }, name, make),
@@ -706,11 +706,11 @@ function graduateScreen() {
     const page = `${location.origin}/award/${id}`;
     const v = encodeURIComponent(grad.card?.name || localStorage.getItem("dch-award-name") || "");
     const score = grad.card?.score ?? state.score;
-    const text = `I completed the DCH Tutorial and powered the full circuit ⚡ Score: ${score}/${state.maxScore}. Learn XRPL dev hands-on on ${state.network} 👇 ${page} @XRPLF #XRPEducationMonth`;
+    const text = `I completed the XRPL Amendments Tutorial and powered the full circuit ⚡ Score: ${score}/${state.maxScore}. Learn XRPL dev hands-on on ${state.network} 👇 ${page} @XRPLF #XRPEducationMonth`;
     share = el("a", { class: "btn primary big", "data-pt": "share-x", href: "https://x.com/intent/post?text=" + encodeURIComponent(text), target: "_blank", rel: "noopener" }, "Share on X");
     nodes.push(el("div", { class: "card grad" },
-      el("img", { class: "award-img", src: `/award/${id}.png?v=${v}`, width: "1200", height: "675", alt: "Your DCH Graduate card: the fully lit circuit with the DCH core powered" }),
-      el("div", { class: "act" }, share, el("a", { class: "btn big", href: `/award/${id}.png`, download: "dch-graduate.png" }, "Download image")),
+      el("img", { class: "award-img", src: `/award/${id}.png?v=${v}`, width: "1200", height: "675", alt: "Your Graduate card: the fully lit circuit with the core powered" }),
+      el("div", { class: "act" }, share, el("a", { class: "btn big", href: `/award/${id}.png`, download: "graduate.png" }, "Download image")),
       el("p", { class: "small" }, "Share opens X with the text filled in. Nothing is posted until you press Post. Your link: ", link(page, page))));
   }
   return { nodes, target: share || make, hint: share ? "Press Share on X, or download the image." : "Enter your name, then press Make my card." };

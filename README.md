@@ -1,4 +1,4 @@
-# DCH Tutorial Game
+# XRPL Amendments Tutorial
 
 An educational game by **AiV**. Learn the XRP Ledger by playing short levels on a **test network**.
 
@@ -54,7 +54,7 @@ levels 6–7 show coming soon. A full devnet run scored 140/140 — see
 - **No skipping:** Next stays put on a step you haven't run yet (Run level / Try it) and on an unanswered quiz question; the arrow points at the button or the answer choices instead. A level's end card only offers the next level once its steps and quiz pass; otherwise it sends you back to what's left. A later level opened by URL or an old bookmark shows "Locked" and points at the level to play.
 - **Long runs:** the page starts a level run as a background job and polls it every 3 seconds (`POST /api/levels/<id>/<part>` with `"async": true`, then `GET /api/jobs/<id>`), so a phone that locks its screen or drops the connection during Level 7's wait keeps going instead of showing "Load failed".
 - **Score:** level points (max 140, as before) plus quiz points: 10 per right answer on your **first** attempt, 9 quizzes x 3 questions = 270. A perfect run is **410**. A retry (after fewer than 2 of 3) can pass the quiz and close the switch, but adds no points, so reading the why lines can't raise your score. Worlds from before quizzes keep their level points and take the quizzes to close their switches again.
-- **Graduation:** close every switch and the game opens a graduate screen. Put a display name on your card (up to 32 characters) and the server checks your world, then draws a card: the fully lit circuit with the DCH core powered, the levels the server verified for you (Level 0, every scored level and the Level 8 explainer, each with its quiz passed), your score and the date (UTC). Download the image or press **Share on X**, which opens X with the text filled in; nothing is posted until you press Post. The share link uses a random id, never your address.
+- **Graduation:** close every switch and the game opens a graduate screen. Put a display name on your card (up to 32 characters) and the server checks your world, then draws a card: the fully lit circuit with the core powered, the levels the server verified for you (Level 0, every scored level and the Level 8 explainer, each with its quiz passed), your score and the date (UTC). Download the image or press **Share on X**, which opens X with the text filled in; nothing is posted until you press Post. The share link uses a random id, never your address.
 - **Amendment gating:** before a level relies on an amendment, the game asks the connected server with the [`feature`](https://xrpl.org/docs/references/http-websocket-apis/admin-api-methods/status-and-debugging-methods/feature) method. If it is not enabled there, the level shows **coming soon** instead of failing. See [Amendments](https://xrpl.org/docs/concepts/networks-and-servers/amendments) and [Known Amendments](https://xrpl.org/resources/known-amendments).
 
 ## Levels
@@ -65,7 +65,7 @@ levels 6–7 show coming soon. A full devnet run scored 140/140 — see
 | 1 | Issue a token, keep rippling off | core rules | **playable** |
 | 2 | Freeze and clawback | Clawback | **playable** |
 | 3 | Issue and accept a credential | Credentials | **playable** |
-| 4 | Open a permissioned domain | PermissionedDomains + PermissionedDEX | **playable** |
+| 4 | Permissioned Domains | PermissionedDomains + PermissionedDEX | **playable** |
 | 5 | Batch: create plus accept | BatchV1_1 (live on mainnet; the original Batch is obsolete) | **playable** |
 | 6 | Deposit in a single-asset vault | SingleAssetVault | **playable** where enabled (devnet), priority |
 | 7 | Fund a loan and repay it | SingleAssetVault + LendingProtocol | **playable** where enabled (devnet), priority |
@@ -145,7 +145,7 @@ Smoke run on testnet (world 1, Nov 21 2026):
   ([Clawback 7F6D25C9…](https://testnet.xrpl.org/transactions/7F6D25C97D637F321A56E4C3F48E555EB34A9996A65D329CC3FBC3BBEE733B74)).
   Should-fail: the Level 1 issuer never enabled clawback →
   [`tecNO_PERMISSION`](https://testnet.xrpl.org/transactions/DCC5AE6160D0AAD29219808D0D824D4FB5F7113C169A852143E42C24165E0071).
-- **Credentials.** Issuer creates `DCH-KYC` for the holder; it is not in force until the holder
+- **Credentials.** Issuer creates `KYC` for the holder; it is not in force until the holder
   accepts it ([docs](https://xrpl.org/docs/concepts/decentralized-storage/credentials)).
   [Create 9EDBDF8F…](https://testnet.xrpl.org/transactions/9EDBDF8F26A630036C554D8D84FC4505F552E0134F7B81CA649299890AAF1F0C),
   [Accept 45052933…](https://testnet.xrpl.org/transactions/45052933A3F433C64F79651F9DDD365B9321B3442114629DDB2C58139F0118F2).
@@ -159,10 +159,10 @@ Smoke run on testnet (world 1, Nov 21 2026):
   confirm nothing landed
   ([86984A06…](https://testnet.xrpl.org/transactions/86984A06F95A6F651ED3C50EBB92167D7727704EAEA6848E4FBA1D8275EAA224)).
 
-- **Permissioned domain.** The issuer creates a domain that accepts its `DCH-KYC` credential;
+- **Permissioned Domains.** The issuer creates a domain that accepts its `KYC` credential;
   the credentialed holder places an offer in that domain's DEX
   ([OfferCreate B5B61950…](https://testnet.xrpl.org/transactions/B5B6195055E18E450A870E240CC3901702001CD5DE9505038FF3BA05D8B7969E)).
-  Should-fail: the holder bot has no `DCH-KYC` credential →
+  Should-fail: the holder bot has no `KYC` credential →
   [`tecNO_PERMISSION`](https://testnet.xrpl.org/transactions/E2F8CE8C8431284CAE4F76DDE90A8CDACF6F3F622E7D44C1542512A9E1B9F210).
 
 The dashboard also lists the world's live ledger objects (credentials, domains, vaults, loan

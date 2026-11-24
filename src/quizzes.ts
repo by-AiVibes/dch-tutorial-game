@@ -52,10 +52,10 @@ export const QUIZZES: Record<string, QuizQuestion[]> = {
   domain: [
     { q: "Who can trade in a permissioned domain's DEX?", choices: ["Everyone", "The domain owner, plus accounts holding an accepted, unexpired credential the domain lists", "Only the issuer"], answer: 1,
       why: "The domain owner is always a member; anyone else needs an accepted, unexpired credential the domain lists." },
-    { q: "A bot with no DCH-KYC credential places an offer in the domain. Result?", choices: ["It works", "It's refused", "It's queued until approved"], answer: 1,
+    { q: "A bot with no KYC credential places an offer in the domain. Result?", choices: ["It works", "It's refused", "It's queued until approved"], answer: 1,
       why: "Without an accepted credential the domain lists, the offer is refused." },
-    { q: "What does Level 4 build on from Level 3?", choices: ["Clawback", "The DCH-KYC credential", "The vault"], answer: 1,
-      why: "The domain accepts the issuer's DCH-KYC credential from Level 3." },
+    { q: "What does Level 4 build on from Level 3?", choices: ["Clawback", "The KYC credential", "The vault"], answer: 1,
+      why: "The domain accepts the issuer's KYC credential from Level 3." },
   ],
   batch: [
     { q: "In all-or-nothing mode, one inner transaction fails. What happens?", choices: ["The others still apply", "None of them apply", "Only the first applies"], answer: 1,

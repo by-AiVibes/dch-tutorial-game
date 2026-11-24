@@ -5,7 +5,7 @@ import type { TxResult } from "../ledger.ts";
 import type { LevelContext, StepOutcome } from "./types.ts";
 import { hex, ledgerEntry, stepper } from "./util.ts";
 
-export const KYC_TYPE = hex("DCH-KYC");
+export const KYC_TYPE = hex("KYC");
 const LSF_ACCEPTED = 0x00010000;
 
 export async function credentialAccepted(ctx: LevelContext, subject: string, issuer: string, type: string): Promise<boolean> {
@@ -19,7 +19,7 @@ async function runGoal(ctx: LevelContext): Promise<StepOutcome> {
   const issuer = ctx.address("issuer");
   const holder = ctx.address("holder");
   try {
-    await step("issuer", { TransactionType: "CredentialCreate", Subject: holder, CredentialType: KYC_TYPE }, "Issuer creates a DCH-KYC credential for the holder");
+    await step("issuer", { TransactionType: "CredentialCreate", Subject: holder, CredentialType: KYC_TYPE }, "Issuer creates a KYC credential for the holder");
     ctx.note("Auditor checks: credential exists but is not in force until accepted");
     const before = await credentialAccepted(ctx, holder, issuer, KYC_TYPE);
     await step("holder", { TransactionType: "CredentialAccept", Issuer: issuer, CredentialType: KYC_TYPE }, "Holder accepts the credential");
@@ -33,7 +33,7 @@ async function runGoal(ctx: LevelContext): Promise<StepOutcome> {
 }
 
 async function runShouldFail(ctx: LevelContext): Promise<StepOutcome> {
-  // holderBot tries to accept a DCH-KYC credential that was issued to someone else.
+  // holderBot tries to accept a KYC credential that was issued to someone else.
   ctx.note("holderBot tries to accept a credential that was not issued to it");
   const attempt = await ctx.submit("holderBot", { TransactionType: "CredentialAccept", Issuer: ctx.address("issuer"), CredentialType: KYC_TYPE });
   return { ok: true, message: `Ledger said ${attempt.engineResult}.`, results: [attempt], attempt };

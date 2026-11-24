@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// End-to-end playthrough of the DCH Tutorial Game, the way a phone player plays it.
+// End-to-end playthrough of the XRPL Amendments Tutorial, the way a phone player plays it.
 //
 //   npm run e2e -- --url http://127.0.0.1:8790
 //   npm run e2e -- --url https://your-game-host.example

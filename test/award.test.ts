@@ -112,7 +112,8 @@ test("PNG renders server-side at 1200x675 with the bundled font, under the size 
   await g.graduate(a, "New name");
   assert.ok(!existsSync(join(AW.awardsDir(), `${id}.png`)), "rename drops the cached image");
   const svg = AW.awardSvg(AW.loadAward(id)!);
-  for (const t of ["DCH GRADUATE", "CIRCUIT COMPLETE", "DCH CORE", "POWERED", "9/9", "SCORE 410/410", "#XRPEducationMonth", "game.example.org", "UTC", "Wallet", "Loan"]) assert.ok(svg.includes(t), t);
+  for (const t of [">GRADUATE<", "CIRCUIT COMPLETE", ">CORE<", "POWERED", "9/9", "SCORE 410/410", "#XRPEducationMonth", "game.example.org", "UTC", "Wallet", "Loan"]) assert.ok(svg.includes(t), t);
+  assert.equal(svg.includes("DCH"), false, "award card does not promote DCH");
   assert.ok(svg.includes("Confidential"), "Level 8 counts through its server-checked quiz");
   const saved = process.env.DCH_PUBLIC_URL;
   delete process.env.DCH_PUBLIC_URL;
@@ -147,7 +148,8 @@ test("share page has og/twitter tags with absolute same-site URLs", () => {
   assert.equal(meta("twitter:image"), meta("og:image"));
   assert.equal(meta("og:image:width"), "1200");
   assert.equal(meta("og:image:height"), "675");
-  assert.match(meta("og:title")!, /Ann: DCH Graduate/);
+  assert.match(meta("og:title")!, /Ann: Graduate/);
+  assert.equal(/DCH/.test(html), false, "share page does not promote DCH");
   assert.match(meta("og:description")!, /#XRPEducationMonth/);
   assert.ok(!/<script|style=|\son\w+=/i.test(html), "nothing that needs a CSP exception");
   assert.match(meta("og:description")!, /Completed all 1 required levels/);

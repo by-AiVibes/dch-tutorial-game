@@ -52,7 +52,7 @@ export const LEVELS: LevelDef[] = [
   live({
     id: "creds", n: 3, title: "Issue and accept a credential", feature: "Credentials",
     goal: "The issuer creates a credential; the holder accepts it so the credential is live.",
-    shouldFail: "The holder bot tries to accept the DCH-KYC credential that was issued to the holder.",
+    shouldFail: "The holder bot tries to accept the KYC credential that was issued to the holder.",
     rejectReason: "Only the credential's subject can accept it, and it is not in force until accepted.",
     expectedRejects: ["tecNO_ENTRY", "tecNO_PERMISSION"],
     goalRoles: ["issuer", "holder"], shouldFailRoles: ["holder", "auditor"],
@@ -60,9 +60,9 @@ export const LEVELS: LevelDef[] = [
     docs: [{ title: "Credentials", href: "https://xrpl.org/docs/concepts/decentralized-storage/credentials" }],
   }, level3Runners),
   live({
-    id: "domain", n: 4, title: "Open a permissioned domain", feature: "PermissionedDomains",
-    goal: "The issuer creates a domain that accepts its DCH-KYC credential; the credentialed holder places an offer in that domain's DEX.",
-    shouldFail: "The holder bot, which has no DCH-KYC credential, tries to place the same offer in the domain.",
+    id: "domain", n: 4, title: "Permissioned Domains", feature: "PermissionedDomains",
+    goal: "The issuer creates a domain that accepts its KYC credential; the credentialed holder places an offer in that domain's DEX.",
+    shouldFail: "The holder bot, which has no KYC credential, tries to place the same offer in the domain.",
     rejectReason: "Apart from its owner, the domain admits only accounts holding an accepted, unexpired credential it lists.",
     expectedRejects: ["tecNO_PERMISSION"],
     goalRoles: ["issuer", "holder"], shouldFailRoles: ["holder", "lender", "borrower"],

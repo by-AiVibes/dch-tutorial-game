@@ -262,7 +262,7 @@ test("an unwritable data dir doesn't kill the server: it starts, serves, and sta
   child.stderr.on("data", (d) => (out += d));
   try {
     const t0 = Date.now();
-    while (!/DCH tutorial game on/.test(out)) {
+    while (!/XRPL Amendments Tutorial on/.test(out)) {
       if (child.exitCode !== null) assert.fail(`server exited: ${out}`);
       if (Date.now() - t0 > 15_000) assert.fail(`server didn't start: ${out}`);
       await new Promise((r) => setTimeout(r, 100));

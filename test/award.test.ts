@@ -14,7 +14,7 @@ process.env.DCH_PUBLIC_URL = "https://game.example.org"; // neutral test host
 delete process.env.DCH_PUBLIC_HOSTS;
 const { Game } = await import("../src/game.ts");
 const { createHandler } = await import("../src/server.ts");
-const { loadConfig } = await import("../src/config.ts");
+const { loadConfig, NETWORKS } = await import("../src/config.ts");
 const { RateLimiter, DEFAULT_RULES } = await import("../src/limits.ts");
 const { SCORED_LEVELS } = await import("../src/levels/index.ts");
 const { statePath } = await import("../src/store.ts");
@@ -218,6 +218,34 @@ test("rate limits: award creation and award views have their own classes", async
   assert.equal(rl.check("1.2.3.4", "awardview"), 0);
   assert.equal(rl.check("1.2.3.4", "awardview"), 0);
   assert.ok(rl.check("1.2.3.4", "awardview") > 0);
+});
+
+test("subtitle stays inside the card for every network name and a long player name", () => {
+  const networks = Object.keys(NETWORKS);
+  const longest = networks.reduce((a, b) => (a.length >= b.length ? a : b));
+  assert.ok(networks.includes("devnet") && networks.includes("testnet"));
+  assert.equal(longest, "testnet");
+  const room = AW.subtitleRoom();
+  assert.equal(room, AW.CARD_W - AW.SUBTITLE_X - AW.CARD_PAD);
+  const levels = Object.values(AW.SHORT).map((short, n) => ({ n, short }));
+  const player = "W".repeat(AW.NAME_MAX);
+  for (const network of networks) {
+    const svg = AW.awardSvg({ id: "S".repeat(24), network, name: player, score: 410, maxScore: 410, date: "2026-11-24", levels });
+    assert.match(svg, />#XRPEducationMonth</);
+    const subs = [...svg.matchAll(/class="subtitle"[^>]*font-size="(\d+)"[^>]*>([^<]*)</g)];
+    assert.ok(subs.length >= 1 && subs.length <= 2, network);
+    for (const [, size, text] of subs) {
+      const width = AW.measureText(text.replaceAll("&amp;", "&").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&#39;", "'"), Number(size));
+      assert.ok(width > 0 && width <= room, `${network} subtitle ${width}px at ${size}px exceeds ${room}px`);
+    }
+    const name = /class="player-name"[^>]*font-size="(\d+)"[^>]*>([^<]*)</.exec(svg);
+    assert.ok(name, "player name is on the card");
+    const nameWidth = AW.measureText(player, Number(name[1]), true);
+    assert.ok(nameWidth > 0 && nameWidth <= room, `player name ${nameWidth}px exceeds ${room}px`);
+    const circuitY = Number(/<text x="\d+" y="(\d+)" font-size="24"/.exec(svg)?.[1]);
+    const lastY = Math.max(...subs.map((m) => Number(/ y="(\d+)"/.exec(m[0])?.[1] ?? 0)));
+    assert.ok(circuitY > lastY, "the circuit line stays below the subtitle");
+  }
 });
 
 test("card lists exactly the levels the server required: a level off on this network is left out", async () => {

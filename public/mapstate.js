@@ -67,6 +67,25 @@ export function mapState(levels, ctx = {}) {
 }
 
 /**
+ * Level-complete celebration on the map. The switch snaps shut, then the path to the
+ * next level lights, and only then may Continue appear. About 1.7s. A tap (skipped)
+ * or prefers-reduced-motion (reduce) jumps to the end state.
+ */
+export const CELEBRATE_SWITCH_MS = 800;
+export const CELEBRATE_PATH_MS = 900;
+export const CELEBRATE_TOTAL_MS = CELEBRATE_SWITCH_MS + CELEBRATE_PATH_MS;
+
+export function celebrateFrame(elapsed, opts = {}) {
+  if (opts.reduce || opts.skipped || elapsed >= CELEBRATE_TOTAL_MS) {
+    return { phase: "done", switchClosed: true, pathLit: true, showContinue: true };
+  }
+  if (elapsed >= CELEBRATE_SWITCH_MS) {
+    return { phase: "path", switchClosed: true, pathLit: true, showContinue: false };
+  }
+  return { phase: "switch", switchClosed: false, pathLit: false, showContinue: false };
+}
+
+/**
  * Serpentine layout for the circuit. Slot -1 is the power source (above node 0) and slot
  * `count` is the lamp. Returns { w, h, pos(slot) -> {x, y} }.
  */

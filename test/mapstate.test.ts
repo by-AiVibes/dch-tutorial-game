@@ -95,6 +95,50 @@ test("browser UI code never stores or sends a seed", async () => {
   }
 });
 
+test("celebration: Continue stays hidden until the switch snaps and the path finishes lighting", () => {
+  assert.ok(M.CELEBRATE_TOTAL_MS >= 1500 && M.CELEBRATE_TOTAL_MS <= 2500);
+  const start = M.celebrateFrame(0);
+  assert.equal(start.showContinue, false);
+  assert.equal(start.switchClosed, false);
+  assert.equal(start.pathLit, false);
+  const mid = M.celebrateFrame(M.CELEBRATE_SWITCH_MS);
+  assert.equal(mid.phase, "path");
+  assert.equal(mid.switchClosed, true);
+  assert.equal(mid.pathLit, true);
+  assert.equal(mid.showContinue, false, "the path lighting is still part of the animation");
+  assert.equal(M.celebrateFrame(M.CELEBRATE_TOTAL_MS - 1).showContinue, false);
+  const end = M.celebrateFrame(M.CELEBRATE_TOTAL_MS);
+  assert.equal(end.phase, "done");
+  assert.equal(end.switchClosed, true);
+  assert.equal(end.pathLit, true);
+  assert.equal(end.showContinue, true);
+});
+
+test("celebration: a tap skips to the end state and shows Continue", () => {
+  const skipped = M.celebrateFrame(40, { skipped: true });
+  assert.deepEqual(skipped, { phase: "done", switchClosed: true, pathLit: true, showContinue: true });
+});
+
+test("celebration: reduced motion shows the end state immediately", () => {
+  const reduced = M.celebrateFrame(0, { reduce: true });
+  assert.deepEqual(reduced, { phase: "done", switchClosed: true, pathLit: true, showContinue: true });
+});
+
+test("page: Continue is gated on the celebration hook, and a tap or reduced motion ends it", async () => {
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(app, /data-anim-done/);
+  assert.match(app, /dataset\.animDone = "1"/);
+  assert.match(app, /"data-pt": "continue-next"/);
+  assert.match(app, /frame\?\.showContinue \? el\("button"/);
+  assert.match(app, /addEventListener\("pointerdown"/);
+  assert.match(app, /prefers-reduced-motion: reduce/);
+  assert.match(app, /Continue to the next level/);
+  const e2e = readFileSync(new URL("../e2e/play.mjs", import.meta.url), "utf8");
+  assert.match(e2e, /dataset\.animDone === "1"/);
+  assert.match(e2e, /dataset\.celebrate/);
+});
+
 test("ring map: switches sit on a circle around the core, inside the board, labels outside the ring", () => {
   const L = M.ringLayout(9);
   const d = (p: any) => Math.hypot(p.x - L.cx, p.y - L.cy);

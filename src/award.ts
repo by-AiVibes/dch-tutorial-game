@@ -154,19 +154,78 @@ function board(ox: number, oy: number, S: number, levels: AwardLevel[]): string 
   return out.join("");
 }
 
+/** Left edge of the text column, and the pad kept inside the card's right edge. */
+export const SUBTITLE_X = 680;
+export const CARD_PAD = 40;
+/** Design size of the subtitle, and the smallest size still worth reading. */
+export const SUBTITLE_MAX = 19;
+export const SUBTITLE_MIN = 14;
+const SUBTITLE_LEAD = "has completed the XRPL Amendments Tutorial";
+
+const fontOpts = { font: { fontFiles: FONTS, loadSystemFonts: false, defaultFontFamily: "DejaVu Sans" } };
+
+/** Width of `text` in the card's font at `size` px. The same measurement the layout uses. */
+export function measureText(text: string, size: number, bold = false): number {
+  const weight = bold ? ' font-weight="bold"' : "";
+  const probe = `<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="200"><text x="0" y="100" font-family="DejaVu Sans" font-size="${size}"${weight}>${esc(text)}</text></svg>`;
+  const bb = new Resvg(probe, fontOpts).getBBox();
+  return bb?.width ?? 0;
+}
+
+/** How wide the subtitle may be: card width, minus the column's left edge and the right pad. */
+export const subtitleRoom = () => CARD_W - SUBTITLE_X - CARD_PAD;
+
 /** Largest font size (<= max) at which the bold name fits in `width` px, measured with the bundled font. */
-function fitSize(escaped: string, width: number, max: number): number {
-  const probe = `<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="200"><text x="0" y="100" font-family="DejaVu Sans" font-size="100" font-weight="bold">${escaped}</text></svg>`;
-  const bb = new Resvg(probe, { font: { fontFiles: FONTS, loadSystemFonts: false, defaultFontFamily: "DejaVu Sans" } }).getBBox();
-  const w100 = bb?.width || 1;
+function fitSize(raw: string, width: number, max: number): number {
+  const w100 = measureText(raw, 100, true) || 1;
   return Math.max(12, Math.min(max, Math.floor((width * 100) / w100)));
+}
+
+export interface SubtitleLine { text: string; size: number; y: number }
+
+/**
+ * The completion line. One line at the design size when it fits. Otherwise two lines
+ * (the tutorial name, then the network). A line that is still too wide shrinks down to
+ * SUBTITLE_MIN; if it overflows even there, it is wrapped on word boundaries.
+ */
+export function layoutSubtitle(network: string): SubtitleLine[] {
+  const room = subtitleRoom();
+  const full = `${SUBTITLE_LEAD} on XRPL ${network}`;
+  const fits = (text: string, size: number) => measureText(text, size) <= room;
+  if (fits(full, SUBTITLE_MAX)) return [{ text: full, size: SUBTITLE_MAX, y: 292 }];
+  let lines = [SUBTITLE_LEAD, `on XRPL ${network}`];
+  let size = SUBTITLE_MAX;
+  while (size > SUBTITLE_MIN && lines.some((line) => !fits(line, size))) size--;
+  if (lines.some((line) => !fits(line, size))) {
+    lines = wrapWords(full, room);
+    size = SUBTITLE_MIN;
+    while (size < SUBTITLE_MAX && lines.every((line) => fits(line, size + 1))) size++;
+  }
+  const gap = 24;
+  const y0 = lines.length === 1 ? 292 : 280;
+  return lines.map((text, i) => ({ text, size, y: y0 + i * gap }));
+}
+
+function wrapWords(raw: string, room: number): string[] {
+  const lines: string[] = [];
+  let cur = "";
+  for (const word of raw.split(" ")) {
+    const next = cur ? `${cur} ${word}` : word;
+    if (measureText(next, SUBTITLE_MIN) <= room) { cur = next; continue; }
+    if (cur) lines.push(cur);
+    cur = word;
+  }
+  if (cur) lines.push(cur);
+  return lines;
 }
 
 /** The award card as SVG. Every piece of player text is escaped. */
 export function awardSvg(rec: AwardRecord, host: string | null = configuredHost()): string {
   const name = esc(rec.name);
-  const nameSize = fitSize(name, 480, 52);
-  const X = 680;
+  const nameSize = fitSize(rec.name, subtitleRoom(), 52);
+  const X = SUBTITLE_X;
+  const subtitle = layoutSubtitle(rec.network);
+  const circuitY = Math.max(330, subtitle[subtitle.length - 1].y + 38);
   const half = Math.ceil(rec.levels.length / 2);
   const rows = rec.levels.map((l, i) => {
     const col = i < half ? 0 : 1, row = i < half ? i : i - half;
@@ -187,9 +246,9 @@ ${board(40, 37, 600, rec.levels)}
 <text x="1160" y="78" text-anchor="end" font-size="17" fill="#9aa3b2">${esc(fmtDate(rec.date))} UTC</text>
 <rect x="${X}" y="100" width="480" height="74" rx="14" fill="#2b2510" stroke="#ffd34d" stroke-width="3"/>
 <text x="${X + 240}" y="148" text-anchor="middle" font-size="36" font-weight="bold" letter-spacing="5" fill="#ffd34d">GRADUATE</text>
-<text x="${X}" y="${nameSize > 40 ? 250 : 244}" font-size="${nameSize}" font-weight="bold" fill="#ffffff">${name}</text>
-<text x="${X}" y="292" font-size="19" fill="#9aa3b2">has completed the XRPL Amendments Tutorial on XRPL ${esc(rec.network)}</text>
-<text x="${X}" y="330" font-size="24" font-weight="bold" letter-spacing="3" fill="#ffd34d">CIRCUIT COMPLETE ⚡</text>
+<text class="player-name" x="${X}" y="${nameSize > 40 ? 250 : 244}" font-size="${nameSize}" font-weight="bold" fill="#ffffff">${name}</text>
+${subtitle.map((line) => `<text class="subtitle" x="${X}" y="${line.y}" font-size="${line.size}" fill="#9aa3b2">${esc(line.text)}</text>`).join("")}
+<text x="${X}" y="${circuitY}" font-size="24" font-weight="bold" letter-spacing="3" fill="#ffd34d">CIRCUIT COMPLETE ⚡</text>
 ${rows}
 <rect x="${X + 245}" y="535" width="235" height="42" rx="21" fill="#2b2510" stroke="#ffd34d" stroke-width="2"/>
 <text x="${X + 362}" y="563" text-anchor="middle" font-size="20" font-weight="bold" fill="#ffd34d">SCORE ${rec.score}/${rec.maxScore}</text>
@@ -200,10 +259,7 @@ ${host ? `<rect x="${X}" y="595" width="480" height="48" rx="12" fill="#e7f5ec"/
 }
 
 export function renderPng(svg: string): Buffer {
-  const png = new Resvg(svg, {
-    fitTo: { mode: "width", value: CARD_W },
-    font: { fontFiles: FONTS, loadSystemFonts: false, defaultFontFamily: "DejaVu Sans" },
-  }).render().asPng();
+  const png = new Resvg(svg, { fitTo: { mode: "width", value: CARD_W }, ...fontOpts }).render().asPng();
   if (png.length > MAX_PNG_BYTES) throw new Error("award image too large");
   return png;
 }

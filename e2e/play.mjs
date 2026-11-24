@@ -119,6 +119,8 @@ const read = () => page.evaluate(() => {
     next: n ? { pt: n.dataset.pt, text: n.textContent, off: n.disabled || n.getAttribute("aria-disabled") === "true" } : null,
     img: !!(q(".award-img")?.complete && q(".award-img")?.naturalWidth),
     address: localStorage.getItem("dch-wallet-address") || "",
+    celebrate: document.body.dataset.celebrate || "",
+    animDone: document.body.dataset.animDone === "1",
   };
 });
 const click = (pt) => page.locator(`[data-pt="${pt}"]`).first().click({ timeout: 10_000 });
@@ -178,6 +180,18 @@ async function playOnce(run) {
   while (Date.now() - t0 < MAX_MS) {
     const s = await read();
     if (s.address && (!saved || saved.address !== s.address)) { saved = { url: BASE, address: s.address, createdAt: new Date().toISOString() }; writeFileSync(PLAYER_FILE, JSON.stringify(saved, null, 2) + "\n"); }
+    // A passed quiz plays the map animation before Continue appears. Tap skips to the end
+    // state (the page does that for any tap), then the next loop presses Continue.
+    if (s.celebrate && !s.animDone) {
+      await page.locator("body").click({ position: { x: 16, y: 96 }, force: true });
+      await page.waitForFunction(() => document.body.dataset.animDone === "1", null, { timeout: 4000 }).catch(() => {});
+      continue;
+    }
+    if (s.celebrate && levels[s.celebrate] && !/PASS|FAIL/.test(levels[s.celebrate].status)) {
+      levels[s.celebrate].status = levels[s.celebrate].errors.length ? "FAIL" : "PASS";
+      say(`== run ${run} Level ${levels[s.celebrate].n} ${s.celebrate}: ${levels[s.celebrate].status}`);
+      if (target && s.celebrate === target.id) break; // --level K: the switch just closed
+    }
     const lvl = levelOf(s.hash);
     if (levels[lvl] && levels[lvl].status === "NOT REACHED") levels[lvl].status = "IN PROGRESS";
     if (/^(Switch closed|Wallet ready) ✓/.test(s.title) && levels[lvl] && !/PASS|FAIL/.test(levels[lvl].status)) {

@@ -63,7 +63,7 @@ export const LEVELS: LevelDef[] = [
     id: "domain", n: 4, title: "Permissioned Domains", feature: "PermissionedDomains",
     goal: "The issuer creates a domain that accepts its KYC credential; the credentialed holder places an offer in that domain's DEX.",
     shouldFail: "The holder bot, which has no KYC credential, tries to place the same offer in the domain.",
-    rejectReason: "Only accounts holding an accepted, unexpired credential the domain lists can trade in a permissioned DEX.",
+    rejectReason: "Apart from its owner, the domain admits only accounts holding an accepted, unexpired credential it lists.",
     expectedRejects: ["tecNO_PERMISSION"],
     goalRoles: ["issuer", "holder"], shouldFailRoles: ["holder", "lender", "borrower"],
     bots: "A credentialed holder bot joins cleanly. An uncredentialed bot is refused.",

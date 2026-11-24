@@ -50,8 +50,8 @@ export const QUIZZES: Record<string, QuizQuestion[]> = {
       why: "The issuer creates the credential; the holder accepts it." },
   ],
   domain: [
-    { q: "Who can trade in a permissioned domain's DEX?", choices: ["Everyone", "Only accounts holding an accepted, unexpired credential the domain lists", "Only the issuer"], answer: 1,
-      why: "Only accounts holding an accepted, unexpired credential the domain lists can trade in a permissioned DEX." },
+    { q: "Who can trade in a permissioned domain's DEX?", choices: ["Everyone", "The domain owner, plus accounts holding an accepted, unexpired credential the domain lists", "Only the issuer"], answer: 1,
+      why: "The domain owner is always a member; anyone else needs an accepted, unexpired credential the domain lists." },
     { q: "A bot with no KYC credential places an offer in the domain. Result?", choices: ["It works", "It's refused", "It's queued until approved"], answer: 1,
       why: "Without an accepted credential the domain lists, the offer is refused." },
     { q: "What does Level 4 build on from Level 3?", choices: ["Clawback", "The KYC credential", "The vault"], answer: 1,

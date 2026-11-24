@@ -14,7 +14,7 @@ import { emptyProgress, publicQuiz, QUIZ_MAX, QUIZ_PASS, QUIZ_POINTS, QUIZZES, q
 import { awardCount, cleanName, loadAward, newAwardId, saveAward, SHORT, type AwardRecord } from "./award.ts";
 import type { StatEvent, Stats } from "./stats.ts";
 import { deleteWorld, emptyWorld, listPlayerWorlds, load, publicView, save, type RecentResult, type WorldState } from "./store.ts";
-import { cleanAddress } from "./secrets.ts";
+import { cleanAddress, looksSecret } from "./secrets.ts";
 
 /** Accounts funded per world: the five role seats plus one holder bot. */
 export const WORLD_ACCOUNTS: AccountKey[] = [...ROLES, "holderBot"];
@@ -174,6 +174,11 @@ export class Game {
 
   async close(): Promise<void> {
     if (this.client?.isConnected()) await this.client.disconnect();
+  }
+
+  /** The connected test-network client. The ledger-close relay subscribes on this same connection. */
+  openClient(): Promise<Client> {
+    return this.ledger();
   }
 
   /** A blank view: no world, no scores (used when the shared world is off over HTTP). */
@@ -513,7 +518,7 @@ export class Game {
     });
   }
 
-  play(levelId: string, part: Part, player: string | null, key: WorldKey = null) {
+  play(levelId: string, part: Part, player: string | null, key: WorldKey = null, onStep?: (raw: Record<string, unknown>) => void) {
     return this.exclusive(key, async () => {
       const state = this.st(key);
       this.touch(key);
@@ -531,6 +536,14 @@ export class Game {
       }
       const client = await this.ledger();
       const memo = (state.memos[levelId] ??= {});
+      let stepLabel = "";
+      // Only these fields are handed to the live log. The wallet seed stays in `wallet` and is not copied.
+      const emitStep = (r: { type: string; engineResult: string; hash: string; validated: boolean; ledgerIndex?: number }) => {
+        onStep?.({
+          label: stepLabel, type: r.type, engineResult: r.engineResult, hash: r.hash, validated: r.validated,
+          ...(typeof r.ledgerIndex === "number" ? { ledgerIndex: r.ledgerIndex } : {}),
+        });
+      };
       const wallet = (k: AccountKey) => {
         const a = state.accounts[k];
         if (!a) throw new Error(`world has no ${k} account; run reset-world`);
@@ -544,12 +557,18 @@ export class Game {
           const who = isRole(k) && state.seats[k].player ? "human" : "bot";
           this.record(state, { ...r, level: levelId, part, note: `${k} (${who})` });
           this.log(`${r.type} by ${k}: ${r.engineResult} ${r.hash}`);
+          emitStep(r);
           return r;
         },
-        note: (m) => this.log(m),
+        note: (m) => {
+          stepLabel = String(m);
+          if (!looksSecret(stepLabel)) this.log(stepLabel);
+        },
         record: (r, who) => {
           this.record(state, { ...r, level: levelId, part, note: who });
           this.log(`${r.type} by ${who}: ${r.engineResult} ${r.hash}`);
+          if (!stepLabel) stepLabel = who;
+          emitStep(r);
         },
         amendmentEnabled: (name) => this.shared.amendments?.amendments[name]?.enabled === true,
         memoOf: (id) => (state.memos[id] ??= {}),

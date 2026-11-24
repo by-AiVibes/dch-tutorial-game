@@ -7,6 +7,7 @@
  * only, and expire; the result itself is also saved in the world, so a lost id costs nothing.
  */
 import { randomBytes } from "node:crypto";
+import { projectRunEvent, type RunEvent } from "./live.ts";
 
 export type JobStatus = "running" | "done" | "error";
 export interface Job {
@@ -20,7 +21,11 @@ export interface Job {
   error?: string;
   /** HTTP status the synchronous route would have used for this error (400, 429, 503…). */
   errorStatus?: number;
+  /** Allowlisted step events, in order. Safe to hand to the browser as the run goes. */
+  events: RunEvent[];
 }
+
+const MAX_RUN_EVENTS = 40;
 
 /**
  * What a finished job keeps: the message, points and score, plus the last few transaction
@@ -38,6 +43,8 @@ export const JOB_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 
 export class JobStore {
   private jobs = new Map<string, Job>();
+  /** Live listeners for a job's run-log. Not part of the job object, so it can't be serialized. */
+  private listeners = new Map<string, Set<(event: RunEvent) => void>>();
   private readonly ttlMs: number;
   private readonly max: number;
   private readonly now: () => number;
@@ -45,8 +52,11 @@ export class JobStore {
     this.ttlMs = ttlMs; this.max = max; this.now = now;
   }
 
-  /** Start fn in the background, or return the job already running for the same slot. */
-  start(slot: string, fn: () => Promise<unknown>, errorStatus: (e: unknown) => number = () => 400): Job {
+  /**
+   * Start fn in the background, or return the job already running for the same slot.
+   * fn receives emit(); only an allowlisted projection of what it passes is kept and streamed.
+   */
+  start(slot: string, fn: (emit: (raw: unknown) => void) => Promise<unknown>, errorStatus: (e: unknown) => number = () => 400): Job {
     this.sweep();
     for (const j of this.jobs.values()) if (j.slot === slot && j.status === "running") return j;
     if (this.jobs.size >= this.max) {
@@ -54,14 +64,35 @@ export class JobStore {
       const old = [...this.jobs.values()].filter((j) => j.status !== "running").sort((a, b) => a.startedAt - b.startedAt)[0];
       if (!old) throw new Error("Too many level runs in progress. Try again in a minute.");
       this.jobs.delete(old.id);
+      this.listeners.delete(old.id);
     }
-    const job: Job = { id: randomBytes(16).toString("base64url"), status: "running", slot, startedAt: this.now() };
+    const job: Job = { id: randomBytes(16).toString("base64url"), status: "running", slot, startedAt: this.now(), events: [] };
+    const waiters = new Set<(event: RunEvent) => void>();
     this.jobs.set(job.id, job);
-    fn().then(
+    this.listeners.set(job.id, waiters);
+    const emit = (raw: unknown) => {
+      const event = projectRunEvent(raw);
+      if (!event) return;
+      job.events.push(event);
+      if (job.events.length > MAX_RUN_EVENTS) job.events.splice(0, job.events.length - MAX_RUN_EVENTS);
+      for (const waiter of waiters) {
+        try { waiter(event); } catch { /* one viewer dropping must not stop the others */ }
+      }
+    };
+    fn(emit).then(
       (r) => { job.status = "done"; job.result = slimResult(r); job.finishedAt = this.now(); },
       (e) => { job.status = "error"; job.error = e instanceof Error ? e.message : String(e); job.errorStatus = errorStatus(e); job.finishedAt = this.now(); },
     );
     return job;
+  }
+
+  /** Hear new run-log events until the returned function is called. Unknown ids are a no-op. */
+  listen(id: string, fn: (event: RunEvent) => void): () => void {
+    const job = this.get(id);
+    const waiters = job ? this.listeners.get(job.id) : undefined;
+    if (!waiters) return () => {};
+    waiters.add(fn);
+    return () => waiters.delete(fn);
   }
 
   get(id: string): Job | null {
@@ -72,6 +103,7 @@ export class JobStore {
   /** What the browser sees: never the slot (it holds the world address). */
   static view(j: Job) {
     return { job: j.id, status: j.status, elapsedSeconds: Math.round(((j.finishedAt ?? Date.now()) - j.startedAt) / 1000),
+      events: j.events,
       ...(j.status === "done" ? { result: j.result } : {}),
       ...(j.status === "error" ? { error: j.error, errorStatus: j.errorStatus ?? 400, busy: j.errorStatus === 503 || j.errorStatus === 429 } : {}) };
   }
@@ -80,6 +112,9 @@ export class JobStore {
 
   private sweep() {
     const t = this.now();
-    for (const [id, j] of this.jobs) if (j.status !== "running" && t - (j.finishedAt ?? t) > this.ttlMs) this.jobs.delete(id);
+    for (const [id, j] of this.jobs) if (j.status !== "running" && t - (j.finishedAt ?? t) > this.ttlMs) {
+      this.jobs.delete(id);
+      this.listeners.delete(id);
+    }
   }
 }

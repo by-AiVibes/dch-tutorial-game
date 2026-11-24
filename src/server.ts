@@ -11,6 +11,8 @@ import { Game } from "./game.ts";
 import { AWARD_ID_RE, awardHtml, awardPng, loadAward, publicBase } from "./award.ts";
 import { assertNoSecrets, cleanAddress } from "./secrets.ts";
 import { JobStore, JobStore as Jobs } from "./jobs.ts";
+import { LedgerRelay, type LedgerSource } from "./ledgerstream.ts";
+import { streamUnsafe } from "./live.ts";
 import { SCORED_LEVELS } from "./levels/index.ts";
 import { BusyError, CapError, classify, clientIp, RateLimiter, rulesFromEnv } from "./limits.ts";
 
@@ -71,7 +73,7 @@ export function openStats(network: string) {
   return new Stats(join(DATA_DIR, "stats.json"), { network, ignoreIps: process.env.DCH_STATS_IGNORE_IPS, ignoreUa: process.env.DCH_STATS_IGNORE_UA });
 }
 
-export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv()), trustProxy = process.env.TRUST_PROXY === "1", jobs = new JobStore()) {
+export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv()), trustProxy = process.env.TRUST_PROXY === "1", jobs = new JobStore(), relay = new LedgerRelay(() => game.openClient() as Promise<LedgerSource>)) {
   return (req: IncomingMessage, res: ServerResponse) => {
     let path = "/";
     try {
@@ -85,13 +87,13 @@ export function createHandler(game: Game, limiter = new RateLimiter(rulesFromEnv
       res.writeHead(429, { "content-type": "application/json", "retry-after": String(wait), "cache-control": "no-store" });
       return res.end(JSON.stringify({ error: "rate_limited", retryAfterSeconds: wait }));
     }
-    handle(game, req, res, trustProxy, jobs, ip).catch((e) =>
+    handle(game, req, res, trustProxy, jobs, ip, relay).catch((e) =>
       e instanceof BusyError ? sendBusy(res, e.message) : e instanceof CapError ? sendCap(res, e) : send(res, 400, { error: e instanceof Error ? e.message : String(e) }),
     );
   };
 }
 
-async function handle(game: Game, req: IncomingMessage, res: ServerResponse, trustProxy = false, jobs = new JobStore(), ip = "") {
+async function handle(game: Game, req: IncomingMessage, res: ServerResponse, trustProxy = false, jobs = new JobStore(), ip = "", relay = new LedgerRelay(() => game.openClient() as Promise<LedgerSource>)) {
   let url: URL;
   try {
     url = new URL(req.url ?? "/", "http://localhost");
@@ -122,6 +124,9 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
     return send(res, 200, k === null && !SHARED_WORLD_HTTP() ? { network: game.cfg.name, world: 0, objects: [] } : await game.objects(k));
   }
   // Background level run status (see jobs.ts). Unknown or expired ids are 404.
+  // /stream is the live feed (run log + ledger closes). Matched before the poll route.
+  const js = /^\/api\/jobs\/([^/]+)\/stream$/.exec(p);
+  if (req.method === "GET" && js) return streamJob(jobs, relay, js[1], req, res);
   const jm = /^\/api\/jobs\/([^/]+)$/.exec(p);
   if (req.method === "GET" && jm) {
     const j = jobs.get(jm[1]);
@@ -178,14 +183,14 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
     if (m) {
       if (!sharedOk) return sharedOff();
       const part = m[2] === "goal" ? "goal" : "shouldFail";
-      const run = () => game.play(m[1], part, player, key);
       // {"async": true}: answer now with a job id and let the page poll (phones drop long fetches).
+      // emit() records an allowlisted step so the poll and the live stream can show it immediately.
       if (b.async === true) {
         if (!SCORED_LEVELS.some((l) => l.id === m[1])) return send(res, 400, { error: `unknown level ${m[1]}` });
-        const j = jobs.start(`${key ?? "shared"}|${m[1]}|${part}`, run, (e) => (e instanceof BusyError ? 503 : e instanceof CapError ? 503 : 400));
+        const j = jobs.start(`${key ?? "shared"}|${m[1]}|${part}`, (emit) => game.play(m[1], part, player, key, emit), (e) => (e instanceof BusyError ? 503 : e instanceof CapError ? 503 : 400));
         return send(res, 202, Jobs.view(j));
       }
-      return send(res, 200, await run());
+      return send(res, 200, await game.play(m[1], part, player, key));
     }
     return send(res, 404, { error: "not_found" });
   }
@@ -203,6 +208,48 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
     }
   }
   send(res, 405, { error: "method_not_allowed" });
+}
+
+const JOB_GONE = "That run isn't known any more. Reload to see your score.";
+
+/**
+ * Server-sent events for one run: the allowlisted step log, plus ledger closes from the
+ * shared XRPL connection. The ledger subscription is dropped when this response closes.
+ */
+function streamJob(jobs: JobStore, relay: LedgerRelay, id: string, req: IncomingMessage, res: ServerResponse) {
+  const job = jobs.get(id);
+  if (!job) return send(res, 404, { error: JOB_GONE });
+  req.setTimeout(0);
+  res.setTimeout(0);
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  const write = (event: string, data: unknown) => {
+    if (streamUnsafe(data)) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  for (const event of job.events) write("run", event);
+  const stopLog = jobs.listen(job.id, (event) => write("run", event));
+  let stopLedger = () => {};
+  let closed = false;
+  const beat = setInterval(() => { try { res.write(`: ping\n\n`); } catch { close(); } }, 4_000);
+  beat.unref?.();
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(beat);
+    stopLog();
+    stopLedger();
+  };
+  req.on("close", close);
+  res.on("close", close);
+  relay.add((event) => { if (!closed) write("ledger", event); }).then((stop) => {
+    if (closed) stop();
+    else stopLedger = stop;
+  }).catch(() => { /* run events already flow; a ledger subscribe failure is not a secret */ });
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

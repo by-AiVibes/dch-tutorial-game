@@ -10,6 +10,8 @@ export interface TxResult {
   type: string;
   account: string;
   at: string;
+  /** Validated ledger that included this tx, when the server reported one. */
+  ledgerIndex?: number;
   /** LedgerEntryType -> index of entries this tx created (e.g. Vault, LoanBroker, Loan). */
   created?: Record<string, string>;
 }
@@ -28,7 +30,8 @@ export async function submitBlob(client: Client, blob: string, hash: string, typ
   try {
     const res = await client.submitAndWait(blob);
     const meta = res.result.meta as Meta | undefined;
-    return { hash: res.result.hash, engineResult: meta?.TransactionResult ?? "unknown", validated: res.result.validated === true, type, account, at, created: createdEntries(meta) };
+    const ledgerIndex = typeof res.result.ledger_index === "number" ? res.result.ledger_index : undefined;
+    return { hash: res.result.hash, engineResult: meta?.TransactionResult ?? "unknown", validated: res.result.validated === true, type, account, at, ...(ledgerIndex !== undefined ? { ledgerIndex } : {}), created: createdEntries(meta) };
   } catch (err) {
     // tem/tef/tel results are refused before a ledger includes them; xrpl.js throws for those.
     // Anything else here (timeout, expired LastLedgerSequence, queued) is NOT a final result:

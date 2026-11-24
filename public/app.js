@@ -2,7 +2,7 @@
 // guided pointer at the next thing to click. Uses textContent everywhere (no innerHTML with data).
 // Only UI position is kept in localStorage (never a seed); game progress comes from the server,
 // from the player's OWN world, keyed by their wallet address (?world=<address>).
-import { mapState, ringLayout, ringArc, levelKind, levelTodo, canOpen, clampStep, quizPending } from "./mapstate.js";
+import { mapState, ringLayout, ringArc, levelKind, levelTodo, canOpen, clampStep, quizPending, celebrateFrame, CELEBRATE_SWITCH_MS, CELEBRATE_TOTAL_MS } from "./mapstate.js";
 import { diagram } from "./diagrams.js";
 import * as W from "./level0.js";
 
@@ -72,28 +72,83 @@ class NetError extends Error { constructor(msg = "The connection dropped.") { su
 /** No answer within API_TIMEOUT_MS: the connection may be fine; the ledger work is slow. */
 class SlowError extends NetError { constructor() { super("The ledger is slow. Reload to see where you are."); } }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The live log only reads these fields, even if a frame carried something else.
+const RUN_FIELDS = ["label", "type", "engineResult", "hash", "validated", "ledgerIndex"];
+const TX_HASH = /^[A-Fa-f0-9]{64}$/;
+function takeRun(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const out = {};
+  for (const k of RUN_FIELDS) if (raw[k] !== undefined) out[k] = raw[k];
+  if (typeof out.hash === "string" && !TX_HASH.test(out.hash)) delete out.hash;
+  if (typeof out.label === "string") out.label = out.label.slice(0, 160);
+  return out.label || out.hash ? out : null;
+}
+function takeLedger(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.ledgerIndex !== "number" || !Number.isInteger(raw.ledgerIndex)) return null;
+  if (typeof raw.closeTime !== "string" || raw.closeTime.length > 40) return null;
+  return { ledgerIndex: raw.ledgerIndex, closeTime: raw.closeTime };
+}
+const runKey = (e) => `${e.label || ""}|${e.hash || ""}|${e.engineResult || ""}`;
+let liveStream = null;
+function closeLiveStream() {
+  if (liveStream) { liveStream.close(); liveStream = null; }
+}
 /**
  * Run a level part as a background job and poll for it. A level can take minutes (Level 7 waits
  * ~4 minutes); a phone drops one long fetch when the screen locks, so the page asks every few
  * seconds instead and simply keeps asking after a dropped connection.
+ * A live stream (when the browser has EventSource) pushes each step and each ledger close
+ * between polls. The poll stays the source of truth if that stream drops.
  */
-async function runLevel(id, part, onWait) {
+async function runLevel(id, part, onWait, onLive) {
   const path = `/api/levels/${id}/${part === "goal" ? "goal" : "should-fail"}`;
   let job, drops = 0;
   for (;;) {
     try { job = await api(path, { player: me(), world: addr(), async: true }); break; }
     catch (e) { if (!(e instanceof NetError) || ++drops > 5) throw e; onWait?.("Connection dropped. Trying again…"); await sleep(3000); }
   }
-  const t0 = Date.now();
-  while (job.status === "running") {
-    await sleep(3000);
-    try { job = await api(`/api/jobs/${encodeURIComponent(job.job)}`); drops = 0; onWait?.(""); }
-    catch (e) {
-      if (!(e instanceof NetError)) throw e;
-      onWait?.("Connection dropped. Still checking; the ledger keeps working.");
-      if (Date.now() - t0 > 15 * 60_000) throw new Error("Lost touch with the server. Reload the page: your score is saved there.");
-    }
+  const events = [];
+  let ledger = null;
+  const publish = () => onLive?.({ events: events.slice(), ledger });
+  const push = (raw) => {
+    const step = takeRun(raw);
+    if (!step) return;
+    const key = runKey(step);
+    if (events.some((x) => runKey(x) === key)) return;
+    events.push(step);
+    publish();
+  };
+  closeLiveStream();
+  if (typeof EventSource === "function") {
+    liveStream = new EventSource(`/api/jobs/${encodeURIComponent(job.job)}/stream`);
+    liveStream.addEventListener("run", (e) => { try { push(JSON.parse(e.data)); } catch { /* a bad frame is skipped */ } });
+    liveStream.addEventListener("ledger", (e) => {
+      try {
+        const tick = takeLedger(JSON.parse(e.data));
+        if (!tick) return;
+        ledger = tick;
+        publish();
+      } catch { /* a bad frame is skipped */ }
+    });
   }
+  publish();
+  const t0 = Date.now();
+  try {
+    while (job.status === "running") {
+      await sleep(3000);
+      try {
+        job = await api(`/api/jobs/${encodeURIComponent(job.job)}`);
+        drops = 0;
+        if (Array.isArray(job.events)) for (const ev of job.events) push(ev);
+        onWait?.("");
+      } catch (e) {
+        if (!(e instanceof NetError)) throw e;
+        onWait?.("Connection dropped. Still checking; the ledger keeps working.");
+        if (Date.now() - t0 > 15 * 60_000) throw new Error("Lost touch with the server. Reload the page: your score is saved there.");
+      }
+    }
+  } finally { closeLiveStream(); }
   if (job.status === "error") throw new Error(job.busy ? "The server is busy. Try again in a few seconds." : job.error || "That run failed.");
   return job.result;
 }
@@ -124,6 +179,7 @@ function render() {
   if (!state) return;
   // Exposed for tests and the e2e player: non-empty while a request is in flight.
   document.body.dataset.busy = busy || "";
+  syncCelebrateFlag();
   const r = route();
   const s = state;
   const seat = Object.values(s.seats).find((x) => addr() && x.wallet === addr()) || Object.values(s.seats).find((x) => x.player && x.player === me());
@@ -142,7 +198,8 @@ function render() {
   if (!out) return;
   $("screen").replaceChildren(...out.nodes.filter(Boolean));
   if (screenKey !== lastScreen) { lastScreen = screenKey; window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }
-  requestAnimationFrame(() => pointer.set(out.target, out.hint));
+  requestAnimationFrame(() => { pointer.set(out.target, out.hint); paintCelebrate(); });
+  scheduleCelebrate();
 }
 
 // ---- guided pointer: flashing arrow + highlight ring on exactly the next thing to click ----
@@ -201,9 +258,106 @@ const pointer = {
 };
 addEventListener("resize", () => pointer.place());
 
+// ---- level-complete celebration: the map switch snaps, then the path lights, then Continue ----
+let celebrate = null; // { id, t0, skipped, reduce, timer }
+let holdRender = false;
+function armCelebrate(id) {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  clearTimeout(celebrate?.timer);
+  celebrate = { id, t0: 0, skipped: reduce, reduce, timer: 0 };
+  // Hash change would render before the answer's refresh clears "busy". Hold that one render.
+  holdRender = true;
+  if (location.hash !== "#/map") location.hash = "#/map";
+  holdRender = false;
+}
+function frameNow() {
+  if (!celebrate) return null;
+  if (!celebrate.t0) celebrate.t0 = performance.now();
+  return celebrateFrame(performance.now() - celebrate.t0, { skipped: celebrate.skipped, reduce: celebrate.reduce });
+}
+function syncCelebrateFlag() {
+  const frame = frameNow();
+  if (celebrate && frame) {
+    document.body.dataset.celebrate = celebrate.id;
+    if (frame.showContinue) document.body.dataset.animDone = "1";
+    else delete document.body.dataset.animDone;
+  } else {
+    delete document.body.dataset.celebrate;
+    delete document.body.dataset.animDone;
+  }
+  return frame;
+}
+function scheduleCelebrate() {
+  if (!celebrate) return;
+  clearTimeout(celebrate.timer);
+  const frame = frameNow();
+  if (!frame || frame.showContinue) return;
+  const elapsed = performance.now() - celebrate.t0;
+  const at = elapsed < CELEBRATE_SWITCH_MS ? CELEBRATE_SWITCH_MS : CELEBRATE_TOTAL_MS;
+  celebrate.timer = setTimeout(() => { if (celebrate) celebrate.timer = 0; render(); }, Math.max(16, at - elapsed + 16));
+}
+function paintCelebrate() {
+  const frame = frameNow();
+  if (!frame || !celebrate || celebrate.reduce || celebrate.skipped) return;
+  if (frame.phase === "switch") {
+    const lever = document.querySelector(".node.just-closed .lever");
+    if (lever && !lever.getAnimations().length) {
+      // CSS owns the spin. Leaving the SVG attribute on would stack a second rotation.
+      lever.removeAttribute("transform");
+      lever.style.transformOrigin = "0% 50%";
+      lever.style.transformBox = "fill-box";
+      const remain = Math.max(200, CELEBRATE_SWITCH_MS - (performance.now() - celebrate.t0));
+      lever.animate([
+        { transform: "rotate(-30deg)" },
+        { transform: "rotate(8deg)", offset: 0.82 },
+        { transform: "rotate(0deg)" },
+      ], { duration: remain, easing: "cubic-bezier(.2,.8,.3,1.25)", fill: "forwards" });
+    }
+  }
+  if (frame.phase === "path") {
+    const path = document.querySelector(".trace.draw");
+    if (path && !path.getAnimations().length) {
+      const remain = Math.max(200, CELEBRATE_TOTAL_MS - (performance.now() - celebrate.t0));
+      path.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: remain, easing: "linear", fill: "forwards" });
+    }
+  }
+}
+function leaveCelebrate() {
+  const id = celebrate?.id;
+  clearTimeout(celebrate?.timer);
+  celebrate = null;
+  const l = state?.levels?.find((x) => x.id === id);
+  const nx = l ? nextLevelAfter(l) : null;
+  if (nx) { ui.step[nx.id] = ui.step[nx.id] || 0; saveUi(); go(`#/level/${nx.id}`); }
+  else render();
+}
+// Any tap during the animation skips to the end state. The click from that same tap is swallowed
+// so it doesn't also open a node; Continue takes a second tap.
+addEventListener("pointerdown", (e) => {
+  if (!celebrate) return;
+  const frame = frameNow();
+  if (!frame || frame.showContinue) return;
+  e.preventDefault();
+  e.stopPropagation();
+  celebrate.skipped = true;
+  celebrate.swallow = true;
+  clearTimeout(celebrate.timer);
+  render();
+}, true);
+addEventListener("click", (e) => {
+  if (!celebrate?.swallow) return;
+  celebrate.swallow = false;
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
+
 // ---- home: the circuit board (switches on a ring around the core chip) ----
 function mapScreen() {
   const ms = mapState(state.levels, { walletDone: walletDone(), read: ui.read });
+  const frame = frameNow();
+  const finished = frame ? state.levels.find((x) => x.id === celebrate.id) : null;
+  const nextPlay = finished ? nextLevelAfter(finished) : null;
+  const lightTo = frame ? (nextPlay ? nextPlay.id : "lamp") : null;
   const N = ms.nodes.length;
   const L = ringLayout(N);
   const g = [];
@@ -220,12 +374,19 @@ function mapScreen() {
     const sx = L.cx + (p.x - L.cx) * k, sy = L.cy + (p.y - L.cy) * k;
     g.push(svg("path", { class: "spoke" + (nd.closed || (i === 0) ? " lit" : ""), d: `M${sx.toFixed(1)} ${sy.toFixed(1)} L${p.x.toFixed(1)} ${p.y.toFixed(1)}` }));
   });
-  // ring traces: node i-1 -> i lit when power reaches i; the closing arc lights on completion
+  // ring traces: node i-1 -> i lit when power reaches i; the closing arc lights on completion.
+  // During a celebration the path to the next level stays dark until the switch has snapped.
   ms.traces.forEach((t, i) => {
     if (i === 0) return; // power enters at Level 0 through its spoke
     const d = i < N ? ringArc(L, i - 1, i) : ringArc(L, N - 1, 0);
-    g.push(svg("path", { class: "trace" + (t.lit ? " lit" : ""), d }));
-    if (t.lit) g.push(svg("path", { class: "flow", d }));
+    const drawing = frame && t.to === lightTo;
+    const held = drawing && !frame.pathLit;
+    const lit = (t.lit && !held) || (drawing && frame.pathLit);
+    g.push(svg("path", {
+      class: "trace" + (lit ? " lit" : "") + (drawing && !frame.showContinue ? " draw" : ""), d,
+      ...(drawing && !frame.showContinue ? { pathLength: "1", "stroke-dasharray": "1", "stroke-dashoffset": "1" } : {}),
+    }));
+    if (lit && !(drawing && !frame.showContinue)) g.push(svg("path", { class: "flow", d }));
   });
   // core chip with pins
   const cs = 104, cx0 = L.cx - cs / 2, cy0 = L.cy - cs / 2;
@@ -254,8 +415,10 @@ function mapScreen() {
       go(`#/level/${nd.id}`);
     };
     const deg = (a * 180) / Math.PI + 90; // lever runs along the ring
+    const just = frame && nd.id === celebrate.id;
+    const swinging = just && !frame.switchClosed;
     g.push(svg("g", {
-      class: `node ${nd.status}`, tabindex: nd.status === "locked" ? "-1" : "0", role: "button",
+      class: `node ${nd.status}` + (just ? " just-closed" : ""), tabindex: nd.status === "locked" ? "-1" : "0", role: "button",
       "aria-label": `Level ${nd.n}: ${nd.short}, ${statusText}`, "data-pt": `node-${nd.id}`,
       on: { click: open, keydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } } },
     },
@@ -264,26 +427,32 @@ function mapScreen() {
       svg("g", { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${deg.toFixed(1)})` },
         svg("circle", { class: "contact", cx: -11, cy: 0, r: 4 }),
         svg("circle", { class: "contact", cx: 11, cy: 0, r: 4 }),
-        svg("line", { class: "lever", x1: -11, y1: 0, x2: 11, y2: 0, transform: nd.closed ? null : "rotate(-30 -11 0)" })),
+        svg("line", { class: "lever", x1: -11, y1: 0, x2: 11, y2: 0, transform: nd.closed && !swinging ? null : "rotate(-30 -11 0)" })),
       nd.partial ? svg("circle", { class: "partial", cx: x + 18, cy: y - 18, r: 5 }) : null,
       svg("circle", { class: "tag", cx: L.badge(i).x, cy: L.badge(i).y, r: 8 }),
       svg("text", { class: "tagnum", x: L.badge(i).x, y: L.badge(i).y + 3.5, "text-anchor": "middle" }, String(nd.n)),
       svg("text", { class: "lab", x: lab.x, y: lab.y, "text-anchor": lab.anchor }, nd.short),
       svg("title", {}, `Level ${nd.n}: ${nd.title} (${statusText})`)));
   }
-  const map = svg("svg", { class: "circuit" + (ms.allComplete ? " complete" : ""), viewBox: `0 0 ${L.w} ${L.h}`, role: "group", "aria-label": `Level map: ${ms.doneCount} of ${ms.total} switches closed` }, g);
+  const map = svg("svg", {
+    class: "circuit" + (ms.allComplete ? " complete" : "") + (frame ? " celebrating" : ""),
+    viewBox: `0 0 ${L.w} ${L.h}`, role: "group", "data-phase": frame ? frame.phase : null,
+    "data-anim-done": frame?.showContinue ? "1" : null,
+    "aria-label": `Level map: ${ms.doneCount} of ${ms.total} switches closed`,
+  }, g);
   const cur = ms.nodes.find((z) => z.id === ms.current);
   // "Start" only for a world with no progress at all; a world waiting on quizzes says Continue.
   const fresh = ms.doneCount === 0 && !ui.step.wallet && !state.score && !quizPending(state.levels, { walletDone: walletDone(), read: ui.read }).length;
-  if (ms.allComplete && addr() && !localStorage.getItem("dch-grad-seen")) { localStorage.setItem("dch-grad-seen", "1"); setTimeout(() => go("#/graduate")); }
-  const gradBtn = ms.allComplete ? el("button", { class: "primary big", "data-pt": "graduate", on: { click: () => go("#/graduate") } }, "🎓 Get your graduate card") : null;
-  const startBtn = cur ? el("button", { class: "primary big", "data-pt": "start", on: { click: () => go(`#/level/${cur.id}`) } },
+  if (ms.allComplete && !frame && addr() && !localStorage.getItem("dch-grad-seen")) { localStorage.setItem("dch-grad-seen", "1"); setTimeout(() => go("#/graduate")); }
+  const gradBtn = ms.allComplete && !frame ? el("button", { class: "primary big", "data-pt": "graduate", on: { click: () => go("#/graduate") } }, "🎓 Get your graduate card") : null;
+  const startBtn = !frame && cur ? el("button", { class: "primary big", "data-pt": "start", on: { click: () => go(`#/level/${cur.id}`) } },
     fresh ? "Start" : `Continue: Level ${cur.n} · ${cur.short}`) : null;
+  const contBtn = frame?.showContinue ? el("button", { class: "primary big", "data-pt": "continue-next", on: { click: leaveCelebrate } }, nextPlay ? "Continue to the next level" : "Continue") : null;
   const nodes = [
     el("div", { class: "maphead" },
-      el("div", {}, el("h1", {}, "Your circuit"), el("p", {}, ms.allComplete ? "All switches closed. The core is powered." : `${ms.doneCount} of ${ms.total} switches closed. Close them all to power the core.`)),
-      startBtn || gradBtn),
-    ms.allComplete ? el("div", { class: "banner", role: "status" }, "Circuit complete! The core is powered. Tap any switch to replay it.") : null,
+      el("div", {}, el("h1", {}, "Your circuit"),       el("p", {}, ms.allComplete ? "All switches closed. The core is powered." : `${ms.doneCount} of ${ms.total} switches closed. Close them all to power the core.`)),
+      contBtn || startBtn || gradBtn),
+    ms.allComplete && !frame ? el("div", { class: "banner", role: "status" }, "Circuit complete! The core is powered. Tap any switch to replay it.") : null,
     (() => {
       // Worlds that finished steps before quizzes existed: say why those switches are open again.
       const pend = quizPending(state.levels, { walletDone: walletDone(), read: ui.read });
@@ -295,8 +464,8 @@ function mapScreen() {
   ];
   return {
     nodes,
-    target: startBtn || gradBtn,
-    hint: ms.allComplete ? "You graduated! Get your card." : fresh ? "Start here: press Start." : `Next: Level ${cur.n} (${cur.short}). Press Continue.`,
+    target: contBtn || startBtn || gradBtn,
+    hint: frame ? (contBtn ? "Press Continue to the next level." : "Watch the switch close. Tap to skip.") : ms.allComplete ? "You graduated! Get your card." : fresh ? "Start here: press Start." : `Next: Level ${cur.n} (${cur.short}). Press Continue.`,
   };
 }
 
@@ -420,8 +589,14 @@ function quizCards(l, firstIdx) {
   const right = qz.answers.filter((a) => a.correct).length;
   const over = qz.answers.length >= n;
   const answer = (i, k) => act("quiz", async () => {
-    try { await api("/api/quiz/answer", { world: addr(), level: l.id, q: i, choice: k }); quizMsg[l.id] = ""; }
-    catch (e) { quizMsg[l.id] = e.message; }
+    try {
+      const res = await api("/api/quiz/answer", { world: addr(), level: l.id, q: i, choice: k });
+      quizMsg[l.id] = "";
+      if (res && res.passed) {
+        if (res.view) state = res.view;
+        armCelebrate(l.id);
+      }
+    } catch (e) { quizMsg[l.id] = e.message; }
   });
   const retry = () => act("quiz", async () => {
     try { await api("/api/quiz/retry", { world: addr(), level: l.id }); ui.step[l.id] = firstIdx; saveUi(); quizMsg[l.id] = ""; }
@@ -489,6 +664,43 @@ function seatChips(roles) {
   }));
 }
 
+const NET_NODES = 5;
+function runLog(live) {
+  const events = live?.events || [];
+  const led = live?.ledger;
+  const rows = events.length ? events.map((t) => {
+    const inLedger = !!t.validated && !!led && (typeof t.ledgerIndex !== "number" || led.ledgerIndex >= t.ledgerIndex);
+    const bits = [el("span", { class: "rl-label" }, t.label || "Transaction")];
+    if (t.type) bits.push(el("span", { class: "rl-type" }, t.type));
+    if (t.engineResult) bits.push(el("span", { class: String(t.engineResult).startsWith("tes") ? "res-tes" : "res-bad" }, t.engineResult));
+    if (typeof t.hash === "string" && TX_HASH.test(t.hash) && state.explorer) bits.push(link(state.explorer + t.hash, t.hash.slice(0, 8) + "…"));
+    if (inLedger) bits.push(el("span", { class: "rl-hit" }, `in ledger #${led.ledgerIndex}`));
+    return el("li", { class: "runline" + (inLedger ? " in-ledger" : "") }, bits);
+  }) : [el("li", { class: "runline wait" }, "Steps show up here as the ledger answers.")];
+  return el("ol", { class: "runlog", "data-run-log": "", "aria-live": "polite", "aria-label": "Level run" }, rows);
+}
+function networkPanel(live) {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const cx = 80, cy = 54, r = 36;
+  const nodes = Array.from({ length: NET_NODES }, (_, i) => {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / NET_NODES;
+    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+  });
+  const parts = [];
+  for (let i = 0; i < NET_NODES; i++) {
+    const a = nodes[i], b = nodes[(i + 1) % NET_NODES];
+    const x1 = a.x.toFixed(1), y1 = a.y.toFixed(1), x2 = b.x.toFixed(1), y2 = b.y.toFixed(1);
+    parts.push(svg("line", { class: "net-link", x1, y1, x2, y2 }));
+    if (!reduce) parts.push(svg("circle", { class: "net-pulse", r: "3", cx: x1, cy: y1 },
+      svg("animate", { attributeName: "cx", values: `${x1};${x2}`, dur: `${(1.5 + i * 0.12).toFixed(2)}s`, repeatCount: "indefinite" }),
+      svg("animate", { attributeName: "cy", values: `${y1};${y2}`, dur: `${(1.5 + i * 0.12).toFixed(2)}s`, repeatCount: "indefinite" })));
+  }
+  for (const n of nodes) parts.push(svg("circle", { class: "net-node", cx: n.x.toFixed(1), cy: n.y.toFixed(1), r: "6" }));
+  const led = live?.ledger;
+  return el("div", { class: "netpanel" },
+    svg("svg", { class: "netring", viewBox: "0 0 160 108", role: "img", "aria-label": "Validator nodes" }, parts),
+    el("p", { class: "ledgetick", "data-ledger": led ? String(led.ledgerIndex) : "" }, led ? `Ledger closed #${led.ledgerIndex}` : "Waiting for a ledger close…"));
+}
 function resultBox(r) {
   if (!r) return null;
   const good = r.ok || (r.added ?? 0) > 0;
@@ -501,12 +713,15 @@ function scoredCards(l) {
   const res = (results[l.id] ||= {});
   const run = (part) => act(part, async () => {
     res.wait = "";
-    try { res[part] = await runLevel(l.id, part, (m) => { if (res.wait !== m) { res.wait = m; render(); } }); }
+    res.live = { events: [], ledger: null };
+    try { res[part] = await runLevel(l.id, part, (m) => { if (res.wait !== m) { res.wait = m; render(); } }, (live) => { res.live = live; render(); }); }
     catch (e) { res[part] = { ok: false, message: "Error: " + e.message }; }
     res.wait = "";
   });
   const waitNote = l.id === "lend" ? "This one waits for the vault's investment phase: usually about a minute, sometimes a few." : "Ledger steps take a few seconds each.";
-  const working = (part) => busy === part ? el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), `Working on ${state.network}… ${waitNote}`, res.wait ? el("span", { class: "note" }, " " + res.wait) : null) : null;
+  const working = (part) => busy === part ? el("div", { class: "liverun" },
+    el("p", { class: "result", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), `Working on ${state.network}… ${waitNote}`, res.wait ? el("span", { class: "note" }, " " + res.wait) : null),
+    runLog(res.live), networkPanel(res.live)) : null;
   const roleList = l.goalRoles.join(", ");
 
   let goalBtn, failBtn;
@@ -720,5 +935,5 @@ $("home").addEventListener("click", () => go("#/map"));
 $("nav-map").addEventListener("click", () => go("#/map"));
 $("nav-tools").addEventListener("click", () => go("#/tools"));
 if ("scrollRestoration" in history) history.scrollRestoration = "manual"; // the browser must not restore an old offset onto a new card
-addEventListener("hashchange", () => { render(); $("screen").focus({ preventScroll: true }); });
+addEventListener("hashchange", () => { if (holdRender) return; render(); $("screen").focus({ preventScroll: true }); });
 refresh().catch((e) => { $("screen").replaceChildren(el("p", { class: "result bad" }, "Server not reachable: " + e.message)); });

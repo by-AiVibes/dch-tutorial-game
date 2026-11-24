@@ -3,6 +3,9 @@
 
 import { projectLedger, type LedgerEvent } from "./live.ts";
 
+/** Waits between subscribe attempts when the first ledger subscribe fails. */
+export const LEDGER_SUBSCRIBE_BACKOFF_MS = [100, 300];
+
 export interface LedgerSource {
   on(event: "ledgerClosed", listener: (msg: unknown) => void): void;
   removeListener(event: "ledgerClosed", listener: (msg: unknown) => void): void;
@@ -58,20 +61,40 @@ export class LedgerRelay {
       const client = await this.connect();
       if (generation !== this.generation || this.listeners.size === 0) return;
       client.on("ledgerClosed", this.onClosed);
+      let live = false;
       try {
-        await client.request({ command: "subscribe", streams: ["ledger"] });
+        live = await this.subscribeLedger(client, generation);
       } catch (err) {
         try { client.removeListener("ledgerClosed", this.onClosed); } catch { /* already gone */ }
         throw err;
       }
-      if (generation !== this.generation || this.listeners.size === 0) {
-        await this.detach(client);
+      if (!live || generation !== this.generation || this.listeners.size === 0) {
+        if (live) await this.detach(client);
+        else try { client.removeListener("ledgerClosed", this.onClosed); } catch { /* already gone */ }
         return;
       }
       this.client = client;
       this.subscribed = true;
     })().finally(() => { this.opening = null; });
     return this.opening;
+  }
+
+  /** First subscribe, retried with backoff. False when the last listener left during a wait. */
+  private async subscribeLedger(client: LedgerSource, generation: number): Promise<boolean> {
+    let last: unknown;
+    for (let attempt = 0; attempt <= LEDGER_SUBSCRIBE_BACKOFF_MS.length; attempt++) {
+      if (generation !== this.generation || this.listeners.size === 0) return false;
+      try {
+        await client.request({ command: "subscribe", streams: ["ledger"] });
+        return true;
+      } catch (err) {
+        last = err;
+        const wait = LEDGER_SUBSCRIBE_BACKOFF_MS[attempt];
+        if (wait == null) break;
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+    throw last;
   }
 
   private async stop(): Promise<void> {

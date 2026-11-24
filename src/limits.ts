@@ -50,6 +50,39 @@ export function classify(_method: string, path: string): LimitClass {
   return "read";
 }
 
+/** How many live run streams one IP may hold open at once. A refresh replaces its own stream. */
+export const MAX_SSE_STREAMS_PER_IP = 4;
+
+/**
+ * After a level run finishes, keep the live stream open this long so the confirming
+ * ledger close (a few seconds on devnet and testnet) can still be relayed.
+ */
+export const SSE_LEDGER_GRACE_MS = 4_000;
+
+/** Concurrent SSE streams, keyed like the rate limiter (IPv4 as-is, IPv6 by /64). */
+export class StreamGate {
+  private open = new Map<string, number>();
+
+  tryAcquire(ip: string): boolean {
+    const key = ipKey(ip || "unknown");
+    const n = this.open.get(key) ?? 0;
+    if (n >= MAX_SSE_STREAMS_PER_IP) return false;
+    this.open.set(key, n + 1);
+    return true;
+  }
+
+  release(ip: string): void {
+    const key = ipKey(ip || "unknown");
+    const n = (this.open.get(key) ?? 0) - 1;
+    if (n <= 0) this.open.delete(key);
+    else this.open.set(key, n);
+  }
+
+  count(ip: string): number {
+    return this.open.get(ipKey(ip || "unknown")) ?? 0;
+  }
+}
+
 /**
  * Rate-limit key for an IP: IPv4 as-is (v4-mapped IPv6 unwrapped), IPv6 bucketed by /64
  * (one host usually owns a whole /64). Anything that isn't an IP becomes "unknown", so

@@ -13,7 +13,8 @@ process.env.DCH_DATA_DIR = mkdtempSync(join(tmpdir(), "dch-live-"));
 const { Game } = await import("../src/game.ts");
 const { createHandler } = await import("../src/server.ts");
 const { loadConfig } = await import("../src/config.ts");
-const { RateLimiter, DEFAULT_RULES } = await import("../src/limits.ts");
+const { RateLimiter, DEFAULT_RULES, MAX_SSE_STREAMS_PER_IP, StreamGate } = await import("../src/limits.ts");
+const { JobStore } = await import("../src/jobs.ts");
 const { findLevel } = await import("../src/levels/index.ts");
 const { LedgerRelay } = await import("../src/ledgerstream.ts");
 const { projectLedger, projectRunEvent, RIPPLE_EPOCH_SEC, streamUnsafe } = await import("../src/live.ts");
@@ -280,6 +281,131 @@ test("a level run with a seed in scope streams only safe run and ledger events, 
   } finally {
     level.runGoal = orig;
     ac.abort();
+    await new Promise((r) => server.close(r));
+  }
+});
+
+function clientLive() {
+  const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const start = app.indexOf("const RUN_FIELDS");
+  const end = app.indexOf("const runKey");
+  return new Function(`${app.slice(start, end)}\nreturn { looksSecret, takeRun, ledgerMark };`)() as {
+    looksSecret: (v: string) => boolean;
+    takeRun: (raw: unknown) => { label?: string; hash?: string } | null;
+    ledgerMark: (tx: { validated?: boolean; ledgerIndex?: number }, latest: { ledgerIndex?: number } | null) => number | null;
+  };
+}
+
+test("in ledger uses the transaction's own index, and a missing index says nothing", () => {
+  const { ledgerMark } = clientLive();
+  const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(app, /in ledger #\$\{mark\}/);
+  assert.equal(app.includes("in ledger #${led.ledgerIndex}"), false);
+  assert.equal(ledgerMark({ validated: true, ledgerIndex: 88 }, { ledgerIndex: 90 }), 88);
+  assert.equal(ledgerMark({ validated: true, ledgerIndex: 90 }, { ledgerIndex: 90 }), 90);
+  assert.equal(ledgerMark({ validated: true }, { ledgerIndex: 90 }), null);
+  assert.equal(ledgerMark({ validated: true, ledgerIndex: 100 }, { ledgerIndex: 90 }), null);
+  assert.equal(ledgerMark({ validated: false, ledgerIndex: 88 }, { ledgerIndex: 90 }), null);
+});
+
+test("the browser drops a secret-looking step label the way the server does", () => {
+  const { looksSecret: clientSecret, takeRun } = clientLive();
+  const seed = Wallet.generate().seed as string;
+  assert.equal(clientSecret(seed), looksSecret(seed));
+  assert.equal(clientSecret("Issuer creates a KYC credential for the holder"), false);
+  const dropped = takeRun({ label: `Issuer creates a KYC credential ${seed}`, type: "CredentialCreate", engineResult: "tesSUCCESS", hash: HASH, validated: true, ledgerIndex: 88 });
+  assert.equal(dropped?.label, undefined);
+  assert.equal(dropped?.hash, HASH);
+  assert.equal(JSON.stringify(dropped).includes(seed), false);
+  const kept = takeRun({ label: "Issuer creates a KYC credential for the holder", type: "CredentialCreate", engineResult: "tesSUCCESS", hash: HASH });
+  assert.equal(kept?.label, "Issuer creates a KYC credential for the holder");
+  assert.equal(takeRun({ label: seed }), null, "a label that is only a seed is not shown");
+});
+
+test("ledger subscribe retries with backoff, then gives up without leaving a listener", async () => {
+  const flaky = fakeLedger();
+  let attempts = 0;
+  flaky.request = async (cmd: { command?: string }) => {
+    if (cmd.command === "subscribe") {
+      attempts++;
+      if (attempts < 3) throw new Error("subscribe failed");
+      flaky.subs++;
+      return {};
+    }
+    if (cmd.command === "unsubscribe") flaky.unsubs++;
+    return {};
+  };
+  const relay = new LedgerRelay(async () => flaky);
+  const stop = await relay.add(() => {});
+  assert.equal(attempts, 3, "the first subscribe is retried until it lands");
+  assert.equal(flaky.subs, 1);
+  stop();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(flaky.listenerCount(), 0);
+
+  const dead = fakeLedger();
+  dead.request = async () => { throw new Error("subscribe failed"); };
+  const dropped = new LedgerRelay(async () => dead);
+  const seen: unknown[] = [];
+  await dropped.add((e) => seen.push(e));
+  dead.emit({ ledger_index: 7, ledger_time: 10 });
+  assert.equal(seen.length, 0);
+  assert.equal(dead.listenerCount(), 0);
+});
+
+test("SSE streams are capped per IP, and a finished job closes after the ledger grace", async () => {
+  const fake = fakeLedger();
+  const g = new Game(loadConfig({}), () => {}, { maxWorlds: 10, minIdleMs: 3_600_000, newPerHour: 10, maxAwards: 10 });
+  const jobs = new JobStore();
+  const gate = new StreamGate();
+  const graceMs = 80;
+  const server = createServer(createHandler(g, new RateLimiter(DEFAULT_RULES), false, jobs, new LedgerRelay(async () => fake), gate, graceMs));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  let finish = () => {};
+  const held = jobs.start("held", () => new Promise((resolve) => { finish = () => resolve({ ok: true }); }));
+  const open: Response[] = [];
+  try {
+    let releaseRun = (_v: unknown) => {};
+    const running = jobs.start("grace", () => new Promise((resolve) => { releaseRun = resolve; }));
+    const live = await fetch(`${base}/api/jobs/${running.id}/stream`);
+    assert.equal(live.status, 200);
+    const reader = live.body!.getReader();
+    let ended = false;
+    const pump = (async () => {
+      try { while (!(await reader.read()).done); } catch { /* ended */ }
+      ended = true;
+    })();
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(ended, false, "the stream stays open while the run is going");
+    const t0 = Date.now();
+    releaseRun({ ok: true, message: "done" });
+    await pump;
+    const elapsed = Date.now() - t0;
+    assert.ok(elapsed >= graceMs - 20, `closed after the grace, was ${elapsed}ms`);
+    assert.ok(elapsed < 1_500, `closed without waiting out the run, was ${elapsed}ms`);
+
+    for (let i = 0; i < MAX_SSE_STREAMS_PER_IP; i++) {
+      const res = await fetch(`${base}/api/jobs/${held.id}/stream`);
+      assert.equal(res.status, 200, `stream ${i}`);
+      open.push(res);
+    }
+    const blocked = await fetch(`${base}/api/jobs/${held.id}/stream`);
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.headers.get("retry-after"), "5");
+    await open[0].body?.cancel();
+    let freed = false;
+    for (let i = 0; i < 30; i++) {
+      const again = await fetch(`${base}/api/jobs/${held.id}/stream`);
+      if (again.status === 200) { open.push(again); freed = true; break; }
+      await again.body?.cancel();
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.equal(freed, true, "closing one stream frees the per-IP slot");
+  } finally {
+    finish();
+    for (const res of open) await res.body?.cancel().catch(() => {});
+    server.closeAllConnections();
     await new Promise((r) => server.close(r));
   }
 });

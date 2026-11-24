@@ -45,6 +45,7 @@ export class JobStore {
   private jobs = new Map<string, Job>();
   /** Live listeners for a job's run-log. Not part of the job object, so it can't be serialized. */
   private listeners = new Map<string, Set<(event: RunEvent) => void>>();
+  private doneWaiters = new Map<string, Set<() => void>>();
   private readonly ttlMs: number;
   private readonly max: number;
   private readonly now: () => number;
@@ -65,6 +66,7 @@ export class JobStore {
       if (!old) throw new Error("Too many level runs in progress. Try again in a minute.");
       this.jobs.delete(old.id);
       this.listeners.delete(old.id);
+      this.doneWaiters.delete(old.id);
     }
     const job: Job = { id: randomBytes(16).toString("base64url"), status: "running", slot, startedAt: this.now(), events: [] };
     const waiters = new Set<(event: RunEvent) => void>();
@@ -80,10 +82,30 @@ export class JobStore {
       }
     };
     fn(emit).then(
-      (r) => { job.status = "done"; job.result = slimResult(r); job.finishedAt = this.now(); },
-      (e) => { job.status = "error"; job.error = e instanceof Error ? e.message : String(e); job.errorStatus = errorStatus(e); job.finishedAt = this.now(); },
+      (r) => { job.status = "done"; job.result = slimResult(r); job.finishedAt = this.now(); this.notifyDone(job.id); },
+      (e) => { job.status = "error"; job.error = e instanceof Error ? e.message : String(e); job.errorStatus = errorStatus(e); job.finishedAt = this.now(); this.notifyDone(job.id); },
     );
     return job;
+  }
+
+  /**
+   * Call fn once the job leaves "running" (or immediately if it already has).
+   * Used to close a live stream after a short grace period.
+   */
+  onDone(id: string, fn: () => void): () => void {
+    const job = this.jobs.get(id);
+    if (!job || job.status !== "running") { fn(); return () => {}; }
+    let set = this.doneWaiters.get(id);
+    if (!set) this.doneWaiters.set(id, (set = new Set()));
+    set.add(fn);
+    return () => set!.delete(fn);
+  }
+
+  private notifyDone(id: string): void {
+    const set = this.doneWaiters.get(id);
+    this.doneWaiters.delete(id);
+    if (!set) return;
+    for (const fn of set) { try { fn(); } catch { /* one viewer dropping must not stop the others */ } }
   }
 
   /** Hear new run-log events until the returned function is called. Unknown ids are a no-op. */
@@ -115,6 +137,7 @@ export class JobStore {
     for (const [id, j] of this.jobs) if (j.status !== "running" && t - (j.finishedAt ?? t) > this.ttlMs) {
       this.jobs.delete(id);
       this.listeners.delete(id);
+      this.doneWaiters.delete(id);
     }
   }
 }

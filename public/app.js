@@ -75,12 +75,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // The live log only reads these fields, even if a frame carried something else.
 const RUN_FIELDS = ["label", "type", "engineResult", "hash", "validated", "ledgerIndex"];
 const TX_HASH = /^[A-Fa-f0-9]{64}$/;
+// Same shapes src/secrets.ts looksSecret refuses, so a label that embeds a seed never reaches the log.
+function looksSecret(value) {
+  const b58 = "1-9A-HJ-NP-Za-km-z";
+  return [
+    new RegExp("(^|[^" + b58 + "])s[" + b58 + "]{24,34}(?![" + b58 + "])"),
+    /[0-9A-Fa-f]{32,}/,
+    /\b[a-z]+(?:[\s,]+[a-z]+){11,}\b/,
+    /\b\d{6}(?:[\s-]+\d{6}){7}\b/,
+  ].some((re) => re.test(value));
+}
 function takeRun(raw) {
   if (!raw || typeof raw !== "object") return null;
   const out = {};
   for (const k of RUN_FIELDS) if (raw[k] !== undefined) out[k] = raw[k];
   if (typeof out.hash === "string" && !TX_HASH.test(out.hash)) delete out.hash;
-  if (typeof out.label === "string") out.label = out.label.slice(0, 160);
+  if (typeof out.label === "string") {
+    if (looksSecret(out.label)) delete out.label;
+    else out.label = out.label.slice(0, 160);
+  }
   return out.label || out.hash ? out : null;
 }
 function takeLedger(raw) {
@@ -88,6 +101,12 @@ function takeLedger(raw) {
   if (typeof raw.ledgerIndex !== "number" || !Number.isInteger(raw.ledgerIndex)) return null;
   if (typeof raw.closeTime !== "string" || raw.closeTime.length > 40) return null;
   return { ledgerIndex: raw.ledgerIndex, closeTime: raw.closeTime };
+}
+/** The tx's own ledger, once a relayed close has reached it. Missing index: say nothing. */
+function ledgerMark(tx, latest) {
+  if (!tx || tx.validated !== true || typeof tx.ledgerIndex !== "number" || !Number.isInteger(tx.ledgerIndex)) return null;
+  if (!latest || typeof latest.ledgerIndex !== "number" || latest.ledgerIndex < tx.ledgerIndex) return null;
+  return tx.ledgerIndex;
 }
 const runKey = (e) => `${e.label || ""}|${e.hash || ""}|${e.engineResult || ""}`;
 let liveStream = null;
@@ -669,13 +688,13 @@ function runLog(live) {
   const events = live?.events || [];
   const led = live?.ledger;
   const rows = events.length ? events.map((t) => {
-    const inLedger = !!t.validated && !!led && (typeof t.ledgerIndex !== "number" || led.ledgerIndex >= t.ledgerIndex);
+    const mark = ledgerMark(t, led);
     const bits = [el("span", { class: "rl-label" }, t.label || "Transaction")];
     if (t.type) bits.push(el("span", { class: "rl-type" }, t.type));
     if (t.engineResult) bits.push(el("span", { class: String(t.engineResult).startsWith("tes") ? "res-tes" : "res-bad" }, t.engineResult));
     if (typeof t.hash === "string" && TX_HASH.test(t.hash) && state.explorer) bits.push(link(state.explorer + t.hash, t.hash.slice(0, 8) + "…"));
-    if (inLedger) bits.push(el("span", { class: "rl-hit" }, `in ledger #${led.ledgerIndex}`));
-    return el("li", { class: "runline" + (inLedger ? " in-ledger" : "") }, bits);
+    if (mark != null) bits.push(el("span", { class: "rl-hit" }, `in ledger #${mark}`));
+    return el("li", { class: "runline" + (mark != null ? " in-ledger" : "") }, bits);
   }) : [el("li", { class: "runline wait" }, "Steps show up here as the ledger answers.")];
   return el("ol", { class: "runlog", "data-run-log": "", "aria-live": "polite", "aria-label": "Level run" }, rows);
 }

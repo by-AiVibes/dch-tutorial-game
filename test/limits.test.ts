@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { BusyError, classify, clientIp, ipKey, QueueGate, RateLimiter, DEFAULT_RULES, type LimitClass, type LimitRule } from "../src/limits.ts";
+import { BusyError, classify, clientIp, ipKey, MAX_SSE_STREAMS_PER_IP, QueueGate, RateLimiter, SSE_LEDGER_GRACE_MS, StreamGate, DEFAULT_RULES, type LimitClass, type LimitRule } from "../src/limits.ts";
 
 const rules = (o: Partial<Record<LimitClass, LimitRule>> = {}): Record<LimitClass, LimitRule> => ({
   read: { max: 3, windowMs: 1000 },
@@ -17,6 +17,18 @@ const rules = (o: Partial<Record<LimitClass, LimitRule>> = {}): Record<LimitClas
   awardview: { max: 3, windowMs: 1000, globalMax: 5 },
   quiz: { max: 3, windowMs: 1000 },
   ...o,
+});
+
+test("live streams: a named per-IP cap, and a grace long enough for one ledger close", () => {
+  assert.equal(MAX_SSE_STREAMS_PER_IP, 4);
+  assert.ok(SSE_LEDGER_GRACE_MS >= 3_000 && SSE_LEDGER_GRACE_MS <= 6_000);
+  const gate = new StreamGate();
+  for (let i = 0; i < MAX_SSE_STREAMS_PER_IP; i++) assert.equal(gate.tryAcquire("203.0.113.9"), true);
+  assert.equal(gate.tryAcquire("203.0.113.9"), false);
+  assert.equal(gate.tryAcquire("203.0.113.10"), true, "another IP has its own cap");
+  gate.release("203.0.113.9");
+  assert.equal(gate.tryAcquire("203.0.113.9"), true);
+  assert.equal(gate.count("::ffff:203.0.113.9"), MAX_SSE_STREAMS_PER_IP, "v4-mapped addresses share the v4 key");
 });
 
 test("classify: reset, account, heavy and read endpoints", () => {

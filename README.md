@@ -207,10 +207,10 @@ Node 20 or newer is enough for the e2e script (it is plain JavaScript). Running 
 Against a local server (`npm start`, default http://127.0.0.1:8790):
 
 ```sh
-git clone https://github.com/by-AiVibes/dch-tutorial-game.git && cd dch-tutorial-game && npm ci && npx playwright install chromium && npm run e2e
+git clone https://github.com/by-AiVibes/xrpl-tutorial-game.git && cd xrpl-tutorial-game && npm ci && npx playwright install chromium && npm run e2e
 ```
 
-Already cloned: `cd dch-tutorial-game && git pull && npm ci && npm run e2e`
+Already cloned: `cd xrpl-tutorial-game && git pull && npm ci && npm run e2e`
 
 To point it at a hosted instance, pass `--url` (no default public host is hardcoded):
 

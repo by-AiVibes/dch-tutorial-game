@@ -1,7 +1,7 @@
 {
-  "name": "dch-tutorial-game",
+  "name": "xrpl-tutorial-game",
   "version": "0.1.0",
-  "description": "XRPL Amendments Tutorial: learn the XRP Ledger by playing levels on testnet/devnet.",
+  "description": "XRPL Tutorial Game by AiV: learn the XRP Ledger by playing levels on testnet/devnet.",
   "scripts": {
     "dch": "node src/cli.ts",
     "start": "node src/server.ts",
@@ -11,14 +11,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/by-AiVibes/dch-tutorial-game.git"
+    "url": "git+https://github.com/by-AiVibes/xrpl-tutorial-game.git"
   },
   "license": "MIT",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/by-AiVibes/dch-tutorial-game/issues"
+    "url": "https://github.com/by-AiVibes/xrpl-tutorial-game/issues"
   },
-  "homepage": "https://github.com/by-AiVibes/dch-tutorial-game#readme",
+  "homepage": "https://github.com/by-AiVibes/xrpl-tutorial-game#readme",
   "dependencies": {
     "@resvg/resvg-js": "2.6.2",
     "xrpl": "^5.3.0"

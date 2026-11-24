@@ -176,7 +176,7 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
     if (p === "/api/quiz/retry") return sharedOk ? send(res, 200, await game.retryQuiz(b.level, key)) : sharedOff();
     if (p === "/api/amendments") return send(res, 200, await game.refreshAmendments());
     if (p === "/api/reset-world") {
-      if (!ALLOW_HTTP_RESET) return send(res, 403, { error: "Run `npm run dch -- reset-world`, or start the server with DCH_ALLOW_HTTP_RESET=1." });
+      if (!ALLOW_HTTP_RESET) return send(res, 403, { error: "Reset is disabled over HTTP. Ask the operator to reset the world." });
       return send(res, 200, await game.resetWorld());
     }
     const m = /^\/api\/levels\/([a-z]+)\/(goal|should-fail)$/.exec(p);

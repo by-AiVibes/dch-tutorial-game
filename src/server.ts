@@ -14,12 +14,13 @@ import { JobStore, JobStore as Jobs } from "./jobs.ts";
 import { LedgerRelay, type LedgerSource } from "./ledgerstream.ts";
 import { streamUnsafe } from "./live.ts";
 import { SCORED_LEVELS } from "./levels/index.ts";
+import { guideConfig, injectGuideConfig } from "./guides.ts";
 import { BusyError, CapError, classify, clientIp, RateLimiter, rulesFromEnv, SSE_LEDGER_GRACE_MS, StreamGate } from "./limits.ts";
 
 const PORT = Number(process.env.PORT || 8790);
 const HOST = process.env.HOST || "127.0.0.1";
 const PUBLIC = join(import.meta.dirname, "..", "public");
-const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css" };
+const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".jpg": "image/jpeg" };
 /** reset-world spends faucet requests; allow it over HTTP only when explicitly enabled. */
 const ALLOW_HTTP_RESET = process.env.DCH_ALLOW_HTTP_RESET === "1";
 /** Seats and level runs in the SHARED world over HTTP. Set 0 on public hosts (players use their own worlds). */
@@ -198,11 +199,14 @@ async function handle(game: Game, req: IncomingMessage, res: ServerResponse, tru
     const rel = normalize(p === "/" ? "/index.html" : p).replace(/^(\.\.[/\\])+/, "");
     const file = join(PUBLIC, rel);
     if (!file.startsWith(PUBLIC)) return send(res, 404, { error: "not_found" });
+    // The guide pictures exist only while the guide picker flag is on.
+    const guides = guideConfig();
+    if (!guides && rel.replaceAll("\\", "/").startsWith("/guides/")) return send(res, 404, { error: "not_found" });
     try {
       const data = await readFile(file);
       if (rel === "/index.html") game.stats?.visit(ip, req.headers["user-agent"]);
       res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" });
-      return res.end(data);
+      return res.end(rel === "/index.html" && guides ? injectGuideConfig(data.toString("utf8"), guides) : data);
     } catch {
       return send(res, 404, { error: "not_found" });
     }

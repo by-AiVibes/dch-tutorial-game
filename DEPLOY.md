@@ -98,3 +98,9 @@ This file is a checklist for running your own copy behind HTTPS. It is not a pro
 - Network: devnet by default (`XRPL_NETWORK=devnet`); set `XRPL_NETWORK=testnet` to switch.
   Only allowlisted test hosts are accepted, and the server must report `network_id` 2 or 1;
   mainnet is refused.
+
+## Lesson guides (optional, off by default)
+
+- `DCH_GUIDE_PICKER=1` turns on the guide picker and the lesson video before each level's quiz. Unset (or any other value) the game is exactly as before: no picker, no video, the guide pictures return 404, and `index.html` is sent untouched.
+- `DCH_GUIDE_VIDEO_BASE` is where the videos are hosted: a same-origin path (default `/lesson-videos/`) or an `https://` URL. The videos are not in this repository. See `docs/lesson-videos.md` for the file list, the compression numbers and the hosting options. With a CDN, add its host to the proxy's `media-src`.
+- If a video is missing the page says "Video unavailable" and Continue still opens the quiz.

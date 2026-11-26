@@ -6,6 +6,12 @@ import { mapState, ringLayout, ringArc, levelKind, levelTodo, canOpen, clampStep
 import { diagram } from "./diagrams.js";
 import * as W from "./level0.js";
 
+// Lesson guides (flag DCH_GUIDE_PICKER): the server adds <meta name="dch-guides"> to the page only when the
+// flag is on. Without it nothing below is loaded or runs, and the game is exactly the one without guides.
+const G = document.querySelector('meta[name="dch-guides"]') ? await import("./guides.js") : null;
+const guideCfg = G ? G.readGuideConfig(document) : null;
+const guideOn = !!guideCfg;
+
 const $ = (id) => document.getElementById(id);
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -212,13 +218,16 @@ function render() {
   if (r.name === "tools") $("nav-tools").setAttribute("aria-current", "page");
 
   // Each card is its own screen: a new route or a new card always starts at the top.
-  const screenKey = r.name + (r.id || "") + (r.name === "level" ? ":" + (ui.step[r.id] ?? 0) : "");
-  const out = r.name === "level" ? levelScreen(r.id) : r.name === "tools" ? toolsScreen() : r.name === "graduate" ? graduateScreen() : mapScreen();
+  const picking = guideOn && r.name !== "tools" && (pickingGuide || !curGuide());
+  const screenKey = r.name + (r.id || "") + (r.name === "level" ? ":" + (ui.step[r.id] ?? 0) : "") + (picking ? ":guide" : "");
+  const lessonVideoEl = guideOn ? document.querySelector("video.lesson-video") : null;
+  const resumeLesson = !!lessonVideoEl && !lessonVideoEl.paused && !lessonVideoEl.ended; // moving a video in the DOM pauses it
+  const out = picking ? guidePickerScreen() : r.name === "level" ? levelScreen(r.id) : r.name === "tools" ? toolsScreen() : r.name === "graduate" ? graduateScreen() : mapScreen();
   if (!out) return;
   $("screen").replaceChildren(...out.nodes.filter(Boolean));
   $("screen").classList.toggle("pin-nav", !!out.pinNav);
   if (screenKey !== lastScreen) { lastScreen = screenKey; window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }
-  requestAnimationFrame(() => { pointer.set(out.target, out.hint); paintCelebrate(); });
+  requestAnimationFrame(() => { pointer.set(out.target, out.hint); paintCelebrate(); if (guideOn) lessonKick(resumeLesson); });
   scheduleCelebrate();
 }
 
@@ -466,7 +475,8 @@ function mapScreen() {
   const nodes = [
     el("div", { class: "maphead" },
       el("div", {}, el("h1", {}, "Your circuit"),       el("p", {}, ms.allComplete ? "All switches closed. The core is powered." : `${ms.doneCount} of ${ms.total} switches closed. Close them all to power the core.`)),
-      contBtn || startBtn || gradBtn),
+      contBtn || startBtn || gradBtn,
+      guideOn && !frame ? el("button", { class: "big", "data-pt": "change-guide", on: { click: () => { pickingGuide = true; render(); } } }, "Change guide") : null),
     ms.allComplete && !frame ? el("div", { class: "banner", role: "status" }, "Circuit complete! The core is powered. Tap any switch to replay it.") : null,
     (() => {
       // Worlds that finished steps before quizzes existed: say why those switches are open again.
@@ -528,6 +538,7 @@ function levelScreen(id) {
     : c.hold ? (c.hint || "Read the run, then press Continue.")
     : c.target && c.target() ? c.hint
     : c.nextDisabled ? (c.hint || "")
+    : c.lesson ? "Press Continue."
     : isLast ? (c.nextHint || "All set. Press the button to continue.")
     : "Press Next →";
   return { nodes, target, hint, pinNav: !!c.hold };
@@ -591,6 +602,10 @@ function finishCard(l, title, lead) {
 }
 
 function cardsFor(l) {
+  const cards = baseCards(l);
+  return guideOn ? withLesson(l, cards) : cards;
+}
+function baseCards(l) {
   if (l.available === false) {
     return [{ title: "Coming soon", body: [el("p", { class: "lead" }, `${l.feature} isn't enabled on ${state.network} yet.`), el("p", { class: "note" }, "The game checks this live and unlocks the level when it is.")] }];
   }
@@ -612,8 +627,104 @@ function cardsFor(l) {
   return scoredCards(l);
 }
 
+// ---- lesson guides: the picker, "Change guide", and the lesson video before each level's quiz ----
+let pickingGuide = false; // "Change guide" was pressed
+const curGuide = () => (guideOn ? G.loadGuide(localStorage, addr()) : null);
+function chooseGuide(id) {
+  G.saveGuide(localStorage, addr(), id);
+  pickingGuide = false;
+  render();
+}
+function guidePickerScreen() {
+  const cur = curGuide();
+  keys.back = null; keys.next = null;
+  const cards = G.GUIDES.map((g) => el("button", {
+    class: "guide-card" + (cur?.guide === g.id ? " on" : ""), type: "button", "data-pt": `guide-${g.id}`, "data-guide": g.id,
+    "aria-pressed": cur?.guide === g.id ? "true" : "false", on: { click: () => chooseGuide(g.id) },
+  }, el("img", { src: g.img, width: "240", height: "240", alt: g.alt }), el("b", {}, g.name), el("span", {}, g.blurb)));
+  const keep = cur ? el("button", { class: "big", "data-pt": "guide-keep", on: { click: () => { pickingGuide = false; render(); } } }, "Keep my guide") : null;
+  return {
+    nodes: [el("section", { class: "card guide-picker", "aria-labelledby": "cardtitle" },
+      el("h2", { id: "cardtitle" }, cur ? "Change your guide" : "Pick your guide"),
+      el("p", { class: "lead" }, "Your guide teaches a short video lesson before each level's quiz. You can change guide any time from the map."),
+      el("div", { class: "guide-cards", role: "group", "aria-label": "Guides" }, cards),
+      keep ? el("div", { class: "act" }, keep) : null)],
+    target: cards[cur?.guide === "b" ? 1 : 0],
+    hint: "Pick a guide.",
+  };
+}
+// Per page-visit video state: "ended" | "skipped" | "failed" | "replaying". What was watched is kept per world.
+const lessonState = {};
+const lessonEls = {}; // one <video> per level+guide, so a re-render does not start it over
+const lessonResolved = (rec, levelId, key) => G.hasSeen(rec, levelId) || lessonState[key] === "ended" || lessonState[key] === "skipped" || lessonState[key] === "failed";
+function lessonDone(levelId, key, status) {
+  lessonState[key] = status;
+  if (status !== "failed") G.markSeen(localStorage, addr(), levelId);
+  render(); // the player stays on this card: Continue is the only way on
+}
+function lessonVideo(levelId, guide, key) {
+  if (lessonEls[key]) return lessonEls[key];
+  const v = el("video", {
+    class: "lesson-video", controls: true, playsinline: true, preload: "metadata", "data-lesson": key,
+    "aria-label": "Lesson video", src: G.videoUrl(guideCfg.videoBase, levelId, guide),
+  });
+  v.addEventListener("ended", () => lessonDone(levelId, key, "ended"));
+  v.addEventListener("error", () => lessonDone(levelId, key, "failed"));
+  lessonEls[key] = v;
+  return v;
+}
+/** After a render: start a fresh lesson, or carry on one the re-render paused. Never changes the route. */
+function lessonKick(resume) {
+  const v = document.querySelector("video.lesson-video");
+  if (!v) return;
+  const first = v.dataset.autoplay === "1";
+  delete v.dataset.autoplay;
+  if (resume || first) { const p = v.play(); if (p && p.catch) p.catch(() => {}); } // a browser may refuse autoplay: the controls still work
+}
+/** 1 when the lesson card sits before this level's quiz, else 0 (always 0 with the flag off). */
+function lessonShift(l) {
+  const rec = curGuide();
+  return rec && G.lessonFile(l.id, rec.guide) ? 1 : 0;
+}
+function lessonCard(l) {
+  const rec = curGuide();
+  if (!rec || !G.lessonFile(l.id, rec.guide)) return null;
+  const guide = G.GUIDES.find((g) => g.id === rec.guide);
+  const key = `${l.id}:${rec.guide}`;
+  const resolved = lessonResolved(rec, l.id, key);
+  const unavailable = lessonState[key] === "failed";
+  return {
+    title: "Lesson video", diag: null, more: false, lesson: true,
+    continueKind: "lesson", nextLabel: "Continue", nextDisabled: !resolved,
+    hint: "Watch the lesson, or press Skip video. Then press Continue.",
+    // A getter: every card is built on each render, and only the one on screen may create the video.
+    get body() {
+      const lead = el("p", { class: "lead" }, `${guide.name} explains: ${fill(l.title).replace(/^Explainer:\s*/i, "")}.`);
+      if (unavailable) {
+        return [lead,
+          el("p", { class: "result bad", role: "status", "data-lesson-status": "unavailable" }, "Video unavailable"),
+          el("p", { class: "note" }, "The quiz is still open: press Continue."),
+          el("div", { class: "act" }, el("button", { class: "big", "data-pt": "lesson-retry", on: { click: () => { delete lessonState[key]; delete lessonEls[key]; render(); } } }, "Try the video again"))];
+      }
+      const fresh = !lessonEls[key];
+      const v = lessonVideo(l.id, rec.guide, key);
+      if (fresh && !resolved) v.dataset.autoplay = "1";
+      return [lead, v, el("div", { class: "act" },
+        resolved ? null : el("button", { class: "big", "data-pt": "lesson-skip", on: { click: () => { v.pause(); lessonDone(l.id, key, "skipped"); } } }, "Skip video"),
+        el("button", { class: "big", "data-pt": "lesson-replay", on: { click: () => { lessonState[key] = "replaying"; v.currentTime = 0; const p = v.play(); if (p && p.catch) p.catch(() => {}); render(); } } }, "Replay"))];
+    },
+  };
+}
+/** The lesson card goes in just before the first quiz card (none while the quiz is still locked). */
+function withLesson(l, cards) {
+  const at = cards.findIndex((c) => c.quiz);
+  const lc = at < 0 ? null : lessonCard(l);
+  return lc ? [...cards.slice(0, at), lc, ...cards.slice(at)] : cards;
+}
+
 // ---- quiz gate: 3 questions, one per card; answers are checked on the server ----
-function quizCards(l, firstIdx) {
+function quizCards(l, firstIdx0) {
+  const firstIdx = firstIdx0 + lessonShift(l); // the lesson card (flag on) sits just before the first quiz card
   const qz = l.quiz;
   if (!qz) return { cards: [], finish: (f) => f };
   const n = qz.questions.length;
@@ -643,7 +754,7 @@ function quizCards(l, firstIdx) {
       ...(a || qz.passed || blocked || over || busy ? { disabled: true } : {}), on: { click: () => answer(i, k) },
     }, (a && a.choice === k ? (a.correct ? "✓ " : "✗ ") : "") + c));
     return {
-      title: `Quiz ${i + 1} of ${n}`, diag: null, more: false,
+      title: `Quiz ${i + 1} of ${n}`, diag: null, more: false, quiz: true,
       body: [
         el("p", { class: "lead" }, q.q),
         group = el("div", { class: "choices", role: "group", "data-pt": `quiz-choices-${i}`, "aria-label": `Question ${i + 1} choices` }, buttons),
